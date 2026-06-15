@@ -1,0 +1,13 @@
+.venv/
+.env
+.dlt/secrets.toml
+.dlt/pipelines/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+
+build/
+dist/

@@ -1,0 +1,4 @@
+dlt[parquet,s3,sqlalchemy]>=1.0.0
+firebolt-sqlalchemy
+python-dotenv
+requests
