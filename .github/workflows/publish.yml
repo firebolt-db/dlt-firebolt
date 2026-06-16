@@ -1,0 +1,38 @@
+name: Release new version
+
+on:
+  workflow_dispatch:
+    inputs:
+      pre-release-tag:
+        required: false
+        description: "Tag for pre-release (optional)"
+      major-release:
+        required: false
+        description: "Trigger a major release (optional). Leave empty for regular release."
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Unit tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pytest -q -m "not integration"
+
+      - name: Publish action
+        uses: firebolt-db/action-python-release@0cb5692fd39a782bce366e9120055d999bc8824b # main
+        with:
+          pre-release-tag: ${{ inputs.pre-release-tag }}
+          major-release: ${{ inputs.major-release }}
+          pypi-username: ${{ secrets.PYPI_USERNAME }}
+          pypi-password: ${{ secrets.PYPI_PASSWORD }}
+          version-file-path: "firebolt_dest/__init__.py"

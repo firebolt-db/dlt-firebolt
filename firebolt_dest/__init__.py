@@ -2,6 +2,8 @@
 
 from firebolt_dest.factory import firebolt
 
+__version__ = "0.1.3"
+
 try:
     import dlt.destinations as _destinations
 
@@ -10,4 +12,4 @@ try:
 except ImportError:
     pass
 
-__all__ = ["firebolt"]
+__all__ = ["firebolt", "__version__"]
