@@ -9,6 +9,9 @@ on:
       major-release:
         required: false
         description: "Trigger a major release (optional). Leave empty for regular release."
+      version-override:
+        required: false
+        description: "Override auto-generated version tag (useful for first release in a new repo)."
 
 jobs:
   publish:
@@ -36,3 +39,4 @@ jobs:
           pypi-username: ${{ secrets.PYPI_USERNAME }}
           pypi-password: ${{ secrets.PYPI_PASSWORD }}
           version-file-path: "firebolt_dest/__init__.py"
+          version-override: ${{ inputs.version-override }}
