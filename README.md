@@ -87,6 +87,10 @@ Tables are created as `{dataset}_{table}` (for example `my_dataset_orders`).
 
 ### Using `.dlt/secrets.toml`
 
+Environment variables are the primary path used in the e2e scripts. You can also load configuration from `.dlt/secrets.toml` with `from_secrets=True` (verified on Firebolt Core with upload mode; see `.dlt/secrets.toml.example`).
+
+**Note:** In dlt's credential block, `host` is the Firebolt **database** name and `database` is the Firebolt **engine** name (matching `FIREBOLT_DATABASE` and `FIREBOLT_ENGINE`, not swapped).
+
 ```python
 pipeline = make_firebolt_pipeline(
     pipeline_name="my_pipeline",
@@ -95,7 +99,7 @@ pipeline = make_firebolt_pipeline(
 )
 ```
 
-Example secrets file (S3 mode on managed):
+Example for managed Firebolt (S3 mode):
 
 ```toml
 [destination.firebolt]
@@ -104,8 +108,8 @@ s3_location_name = "your_location_name"
 s3_prefix = "dlt-landing"
 
 [destination.firebolt.credentials]
-host = "YOUR_DATABASE"
-database = "YOUR_ENGINE"
+host = "YOUR_FIREBOLT_DATABASE"
+database = "YOUR_FIREBOLT_ENGINE"
 username = "YOUR_CLIENT_ID"
 password = "YOUR_CLIENT_SECRET"
 account_name = "YOUR_ACCOUNT_NAME"
@@ -114,7 +118,7 @@ account_name = "YOUR_ACCOUNT_NAME"
 bucket_url = "s3://your-bucket/dlt-landing/dlt/staging"
 ```
 
-See `.dlt/secrets.toml.example` in the repository for a full template.
+See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
 
 ## Configuration
 

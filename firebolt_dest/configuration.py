@@ -26,7 +26,7 @@ class FireboltCredentials(ConnectionStringCredentials):
         default="firebolt", init=False, repr=False, compare=False
     )
     database: str = None
-    host: str = None  # engine name in the URL path
+    host: str = None  # Firebolt database name in the connection URL
     account_name: str = None
 
     __query_params__: ClassVar[list[str]] = ["account_name"]
@@ -48,6 +48,7 @@ class FireboltCredentials(ConnectionStringCredentials):
     def on_resolved(self) -> None:
         super().on_resolved()
         if self.is_core_connection():
+            self.account_name = self.account_name or "core"
             return
         if self.account_name and "account_name" not in (self.query or {}):
             self.query = dict(self.query or {})

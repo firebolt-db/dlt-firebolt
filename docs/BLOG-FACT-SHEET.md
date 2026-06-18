@@ -71,7 +71,8 @@ Add: the destination does **not** enforce this client-side.
 
 ### 4. Real example — GitHub stargazers
 - Self-contained: `FIREBOLT_USE_CORE=1` inside the code block.
-- Verified on Core (`scripts/github_stars_core_e2e.sh`).
+- Bounded: `MAX_PAGES = 1` to match verified run; note GitHub rate limits.
+- Verified on Core (`scripts/github_stars_core_e2e.sh oss_analytics 1`).
 
 ### 5. Under the hood
 - Upload: spec-tied 1 GB quote + link; S3 for larger loads.
@@ -82,6 +83,7 @@ Add: the destination does **not** enforce this client-side.
 
 ### 7. Availability
 - Community package framing only; no unverified dlt-core collaboration claim.
+- Wording: "Install from PyPI" (publish package before the blog goes live).
 
 ---
 
@@ -93,8 +95,8 @@ Add: the destination does **not** enforce this client-side.
 - [ ] Manual twine publish → PyPI 0.2.0
 - [x] Blog `pip install` and PyPI links point at 0.2.0
 - [x] Merge section has no atomicity language
-- [ ] Wheel built; install-tested via `core_e2e.sh` + `github_stars_core_e2e.sh`
-- [ ] All upload code committed
+- [x] Wheel built; install-tested via `core_e2e.sh` + `github_stars_core_e2e.sh`
+- [x] All upload code committed
 
 ---
 

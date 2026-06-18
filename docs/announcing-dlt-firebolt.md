@@ -2,9 +2,9 @@
 
 dlt (data load tool) has become one of the most widely adopted open-source libraries for moving data into analytical systems. It handles schema inference, normalization, and incremental loading through a simple embedded Python library, and it has become a go-to for both hand-written and agent-generated data workflows.
 
-Until now, dlt could already read from Firebolt through its standard SQL source, but had no native way to write into it at scale. Teams who wanted to land data in Firebolt through dlt had to assemble the staging and load steps themselves. dlt-firebolt closes that gap. It is a native dlt destination for Firebolt that you install with a single command and select like any other warehouse target.
+Until now, dlt could already read from Firebolt through its standard SQL source, but had no native write destination. Teams who wanted to land data in Firebolt through dlt had to assemble the staging and load steps themselves. dlt-firebolt closes that gap. It is a native dlt destination for Firebolt that you install with a single command and select like any other warehouse target.
 
-The destination supports two staging modes. **Upload mode** sends Parquet straight to Firebolt over HTTP — no S3 bucket, no external location, no AWS credentials for the load step. It is the default and works today on **Firebolt Core** and local dev. **S3 mode** stages Parquet in your bucket and loads with `COPY INTO`; use it for **managed Firebolt production** and large bulk loads.
+The destination supports two staging modes. **Upload mode** sends Parquet straight to Firebolt over HTTP, with no S3 bucket, no external location, and no AWS credentials for the load step. It is the default and works today on **Firebolt Core** and local dev. **S3 mode** stages Parquet in your bucket and loads with `COPY INTO`; use it for **managed Firebolt production** and large bulk loads.
 
 > **Requires [dlt-firebolt 0.2.0+](https://pypi.org/project/dlt-firebolt/0.2.0/).** Upload mode is new in 0.2.x. Earlier PyPI releases support S3 staging only.
 
@@ -73,7 +73,9 @@ See the [README](https://github.com/firebolt-db/dlt-firebolt) for the full refer
 
 ### A real pipeline example
 
-Here is a recognizable end-to-end example: GitHub stargazers for a public repo, loaded with merge so reruns stay idempotent. This pipeline was verified on Firebolt Core with upload mode (`scripts/github_stars_core_e2e.sh` in the repository).
+Here is a recognizable end-to-end example: GitHub stargazers for a public repo, loaded with merge so reruns stay idempotent. The snippet below matches what we verified on Firebolt Core with upload mode: one page of stargazers (`scripts/github_stars_core_e2e.sh oss_analytics 1`).
+
+Unauthenticated GitHub API access is limited to 60 requests per hour; a token in the request headers raises that limit if you paginate further.
 
 ```python
 import os
@@ -87,6 +89,7 @@ os.environ.setdefault("FIREBOLT_USE_CORE", "1")
 os.environ.setdefault("FIREBOLT_CORE_URL", "http://localhost:3473")
 
 GITHUB_REPO = "dlt-hub/dlt"
+MAX_PAGES = 1  # verified run; increase only with a GitHub token
 
 @dlt.resource(
     name="github_stars",
@@ -94,8 +97,7 @@ GITHUB_REPO = "dlt-hub/dlt"
     primary_key="user_login",
 )
 def github_stars():
-    page = 1
-    while True:
+    for page in range(1, MAX_PAGES + 1):
         response = requests.get(
             f"https://api.github.com/repos/{GITHUB_REPO}/stargazers",
             headers={"Accept": "application/vnd.github.v3.star+json"},
@@ -111,7 +113,6 @@ def github_stars():
                 "user_login": row["user"]["login"],
                 "starred_at": row["starred_at"],
             }
-        page += 1
 
 pipeline = make_firebolt_pipeline(
     pipeline_name="github_to_firebolt",
@@ -143,9 +144,9 @@ Nested merge has been verified on Firebolt Core (upload mode) and on managed Fir
 
 A merge is not a single statement. It runs in two phases.
 
-**Phase 1 — stage the batch.** dlt writes Parquet and loads it into Firebolt staging tables (via upload or `COPY INTO`, depending on mode).
+**Phase 1: stage the batch.** dlt writes Parquet and loads it into Firebolt staging tables (via upload or `COPY INTO`, depending on mode).
 
-**Phase 2 — apply the upsert.** The destination runs a follow-up block in a fixed order so nested child rows stay aligned with their parent keys:
+**Phase 2: apply the upsert.** The destination runs a follow-up block in a fixed order so nested child rows stay aligned with their parent keys. The emitted SQL follows this shape (temp table names include hash suffixes in practice, and inserts enumerate columns):
 
 ```sql
 -- Snapshot the keys being replaced
@@ -177,4 +178,4 @@ Ordinary appends and replaces skip the merge follow-up and use the simpler load 
 
 ## Availability
 
-dlt-firebolt is a community package maintained by Firebolt, released under the Apache 2.0 license and supporting Python 3.10 and above. The source is public at [github.com/firebolt-db/dlt-firebolt](https://github.com/firebolt-db/dlt-firebolt), and the package is published on [PyPI](https://pypi.org/project/dlt-firebolt/0.2.0/) (install with `pip install "dlt-firebolt>=0.2.0"`).
+dlt-firebolt is a community package maintained by Firebolt, released under the Apache 2.0 license and supporting Python 3.10 and above. The source is public at [github.com/firebolt-db/dlt-firebolt](https://github.com/firebolt-db/dlt-firebolt). Install from [PyPI](https://pypi.org/project/dlt-firebolt/0.2.0/) with `pip install "dlt-firebolt>=0.2.0"`.
