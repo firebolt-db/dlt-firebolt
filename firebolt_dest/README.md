@@ -1,12 +1,29 @@
 # Firebolt destination for dlt
 
-Loads dlt pipelines into Firebolt using **filesystem staging (Parquet on S3) + `COPY INTO`**.
+Loads dlt pipelines into Firebolt using **direct HTTP upload (default)** or **S3 staging + `COPY INTO`**.
+
+**Requires dlt-firebolt 0.2.0+** for upload mode. Earlier releases (0.1.x) support S3 staging only.
+
+## Two ways to load
+
+| Mode | Best for |
+|------|----------|
+| **`upload` (default)** | Firebolt Core, local dev, quick starts |
+| **`s3`** | Managed Firebolt production, large bulk loads |
+
+On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the code default but the managed engine does not accept multipart upload yet.
 
 ## Prerequisites
 
-1. **Firebolt service account** (Settings → Service accounts) with access to your database and engine.
+### Upload mode (Core / local)
+
+Firebolt Core running locally (default endpoint `http://localhost:3473`). No S3 bucket, external location, or AWS credentials for the Firebolt load step.
+
+### S3 mode (managed production)
+
+1. **Firebolt service account** with access to your database and engine.
 2. **S3 bucket** for dlt filesystem staging.
-3. **Firebolt external location** pointing at that bucket prefix:
+3. **Firebolt external location** for that bucket prefix:
 
 ```sql
 CREATE LOCATION "your_location_name" WITH
@@ -15,12 +32,12 @@ CREATE LOCATION "your_location_name" WITH
   CREDENTIALS = (AWS_ROLE_ARN = 'arn:aws:iam::...:role/...');
 ```
 
-Set `FIREBOLT_S3_LOCATION_NAME` (or `s3_location_name` in secrets) to the exact location name above.
+Set `FIREBOLT_S3_LOCATION_NAME` and `FIREBOLT_STAGING_MODE=s3`.
 
 ## Install
 
 ```bash
-pip install dlt-firebolt
+pip install "dlt-firebolt>=0.2.0"
 ```
 
 Import once so dlt registers the destination:
@@ -31,32 +48,30 @@ import firebolt_dest  # noqa: F401
 
 ## Configuration
 
-### `.dlt/secrets.toml`
+### Firebolt Core
 
-```toml
-[destination.firebolt]
-s3_location_name = "your_location_name"
-s3_prefix = "dlt-landing"
-
-[destination.firebolt.credentials]
-host = "YOUR_DATABASE"
-database = "YOUR_ENGINE"
-username = "YOUR_CLIENT_ID"
-password = "YOUR_CLIENT_SECRET"
-account_name = "YOUR_ACCOUNT_NAME"
-
-[destination.filesystem]
-bucket_url = "s3://your-bucket/dlt-landing/dlt/staging"
+```
+FIREBOLT_USE_CORE=1
+FIREBOLT_CORE_URL=http://localhost:3473
+FIREBOLT_STAGING_MODE=upload
 ```
 
-### Environment variables
+### Managed Firebolt (S3)
 
-See the repository `.env.example` for the full list. Minimum:
+```
+FIREBOLT_CLIENT_ID=...
+FIREBOLT_CLIENT_SECRET=...
+FIREBOLT_ACCOUNT_NAME=...
+FIREBOLT_DATABASE=...
+FIREBOLT_ENGINE=...
+FIREBOLT_STAGING_MODE=s3
+S3_BUCKET=...
+FIREBOLT_S3_LOCATION_NAME=...
+```
 
-- `FIREBOLT_CLIENT_ID`, `FIREBOLT_CLIENT_SECRET`
-- `FIREBOLT_ACCOUNT_NAME`, `FIREBOLT_DATABASE`, `FIREBOLT_ENGINE`
-- `FIREBOLT_S3_LOCATION_NAME`, `S3_BUCKET`, `S3_PREFIX`
-- AWS credentials for S3 staging (`AWS_PROFILE` or standard env vars)
+The destination resolves the engine URL from your account on managed; you do not set an HTTP endpoint manually.
+
+See the repository [README](https://github.com/firebolt-db/dlt-firebolt) and `.env.example` for the full reference.
 
 ## Usage
 
@@ -80,12 +95,11 @@ Tables are created as `{dataset}_{table}` (e.g. `my_dataset_orders`).
 | Feature | Support |
 |---------|---------|
 | Loader format | Parquet only |
-| Staging | Filesystem (S3) required |
+| Staging | `upload` (HTTP, default) or `s3` (COPY INTO) |
 | `append` | Yes |
 | `replace` | `truncate-and-insert`, `insert-from-staging` |
-| `merge` | `delete-insert` |
-| Transactions | Merge follow-up jobs run in an explicit transaction; ordinary loads use autocommit |
+| `merge` | `delete-insert` (single-table and nested) |
 
 ## Upstream status
 
-Community destination maintained in [firebolt-db/dlt-firebolt](https://github.com/firebolt-db/dlt-firebolt). Not merged into core dlt.
+Community destination maintained in [firebolt-db/dlt-firebolt](https://github.com/firebolt-db/dlt-firebolt). Not part of core dlt.

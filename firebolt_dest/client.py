@@ -23,6 +23,13 @@ from dlt.destinations.sql_client import SqlClientBase
 from firebolt_dest.configuration import FireboltClientConfiguration
 from firebolt_dest.copy_sql import gen_firebolt_copy_sql, s3_url_to_copy_pattern
 from firebolt_dest.sql_client import FireboltSqlClient
+from firebolt_dest.upload_client import (
+    gen_upload_insert_sql,
+    resolve_engine_endpoint,
+    resolve_local_parquet_path,
+    sanitize_upload_part_name,
+    upload_parquet_insert,
+)
 
 
 class FireboltCopyLoadJob(CopyRemoteFileLoadJob):
@@ -51,6 +58,40 @@ class FireboltCopyLoadJob(CopyRemoteFileLoadJob):
             file_format=file_format,
         )
         self._sql_client.execute_sql(copy_sql)
+
+
+class FireboltUploadLoadJob(CopyRemoteFileLoadJob):
+    """Load Parquet into Firebolt via HTTP multipart upload (upload://)."""
+
+    def __init__(
+        self,
+        file_path: str,
+        staging_credentials: Optional[CredentialsConfiguration] = None,
+    ) -> None:
+        super().__init__(file_path, staging_credentials)
+        self._job_client: FireboltClient = None
+
+    def run(self) -> None:
+        config = self._job_client.config
+        credentials = config.credentials
+        local_path = resolve_local_parquet_path(self._bucket_path)
+        if not local_path.is_file():
+            raise FileNotFoundError(f"Upload staging file not found: {local_path}")
+
+        part_name = sanitize_upload_part_name(local_path.stem)
+        qualified_table = self._job_client.sql_client.make_qualified_table_name(
+            self.load_table_name
+        )
+        sql = gen_upload_insert_sql(qualified_table, part_name)
+        engine_url, database, token = self._job_client._upload_endpoint_cached()
+        upload_parquet_insert(
+            engine_url=engine_url,
+            database=database,
+            token=token,
+            sql=sql,
+            part_name=part_name,
+            file_path=local_path,
+        )
 
 
 class FireboltMergeJob(SqlMergeFollowupJob):
@@ -121,6 +162,16 @@ class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
         self.config: FireboltClientConfiguration = config
         self.sql_client: FireboltSqlClient = sql_client  # type: ignore[assignment]
         self.type_mapper = self.capabilities.get_type_mapper()
+        self._upload_endpoint: tuple[str, str, str] | None = None
+
+    def _upload_endpoint_cached(self) -> tuple[str, str, str]:
+        if self._upload_endpoint is None:
+            self._upload_endpoint = resolve_engine_endpoint(
+                self.config.credentials,
+                core_url=self.config.core_url,
+                use_core=self.config.use_core,
+            )
+        return self._upload_endpoint
 
     def _create_merge_followup_jobs(
         self, table_chain: Sequence[PreparedTableSchema]
@@ -135,14 +186,26 @@ class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
             assert ReferenceFollowupJobRequest.is_reference_job(file_path), (
                 "Firebolt destination requires filesystem staging for file loads"
             )
-            job = FireboltCopyLoadJob(
-                file_path,
-                staging_credentials=(
-                    self.config.staging_config.credentials if self.config.staging_config else None
-                ),
-                location_name=self.config.s3_location_name,
-                s3_prefix=self.config.s3_prefix,
-            )
+            if self.config.staging_mode == "upload":
+                job = FireboltUploadLoadJob(
+                    file_path,
+                    staging_credentials=(
+                        self.config.staging_config.credentials
+                        if self.config.staging_config
+                        else None
+                    ),
+                )
+            else:
+                job = FireboltCopyLoadJob(
+                    file_path,
+                    staging_credentials=(
+                        self.config.staging_config.credentials
+                        if self.config.staging_config
+                        else None
+                    ),
+                    location_name=self.config.s3_location_name,
+                    s3_prefix=self.config.s3_prefix,
+                )
         return job
 
     def _from_db_type(

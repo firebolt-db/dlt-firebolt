@@ -1,8 +1,8 @@
-"""dlt destination for Firebolt (staged Parquet + COPY INTO)."""
+"""dlt destination for Firebolt (HTTP upload or S3 staging + COPY INTO)."""
 
 from firebolt_dest.factory import firebolt
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 try:
     import dlt.destinations as _destinations
