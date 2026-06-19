@@ -26,21 +26,11 @@ pip install "dlt-firebolt>=0.2.0"
 ```
 
 ```python
-import dlt
 import firebolt_dest  # registers destination="firebolt"
 from firebolt_dest.configuration import make_firebolt_pipeline
-
-@dlt.resource(name="orders", write_disposition="append")
-def orders():
-    yield {"order_id": 1, "customer": "Acme"}
-
-pipeline = make_firebolt_pipeline(
-    pipeline_name="my_pipeline",
-    dataset_name="my_dataset",
-)
-
-pipeline.run(orders(), loader_file_format="parquet")
 ```
+
+Point `make_firebolt_pipeline` at your dataset, pass any dlt resource, and run with `loader_file_format="parquet"`. The pipeline example below loads Hacker News top stories with merge on Firebolt Core.
 
 On Firebolt Core, set `FIREBOLT_USE_CORE=1` before running. That uses **upload mode** by default: dlt writes Parquet locally, then the destination uploads each file over HTTP and loads it with `INSERT INTO … SELECT FROM READ_PARQUET('upload://…')`.
 
