@@ -139,11 +139,12 @@ def staging_mode_from_env() -> Literal["upload", "s3"]:
 
 
 def use_core_from_env() -> bool:
-    return os.environ.get("FIREBOLT_USE_CORE", "").strip().lower() in ("1", "true", "yes")
+    """Core when FIREBOLT_CORE_URL is set; managed otherwise."""
+    return bool(os.environ.get("FIREBOLT_CORE_URL", "").strip())
 
 
 def core_url_from_env() -> str:
-    return os.environ.get("FIREBOLT_CORE_URL", "http://localhost:3473").strip()
+    return _require_env("FIREBOLT_CORE_URL")
 
 
 def local_staging_bucket_url() -> str:
@@ -202,7 +203,7 @@ def make_firebolt_pipeline(
         "staging_mode": mode,
         "s3_prefix": s3_prefix_from_env(),
         "use_core": use_core,
-        "core_url": core_url_from_env(),
+        "core_url": core_url_from_env() if use_core else "",
     }
     if mode == "s3":
         dest_kwargs["s3_location_name"] = s3_location_name_from_env()

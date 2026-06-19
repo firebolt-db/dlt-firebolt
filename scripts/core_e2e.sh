@@ -2,9 +2,9 @@
 # Core e2e: upload mode, no S3. Run on your machine with Core Docker up on :3473.
 set -euo pipefail
 
-export FIREBOLT_USE_CORE=1
-export FIREBOLT_STAGING_MODE=upload
 export FIREBOLT_CORE_URL="${FIREBOLT_CORE_URL:-http://localhost:3473}"
+export FIREBOLT_STAGING_MODE=upload
+unset FIREBOLT_ACCOUNT_NAME 2>/dev/null || true
 export FIREBOLT_CORE_DATABASE="${FIREBOLT_CORE_DATABASE:-firebolt}"
 
 DATASET="${1:-core_e2e}"

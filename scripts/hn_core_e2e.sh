@@ -2,9 +2,9 @@
 # Hacker News top stories → Firebolt Core (upload mode). Blog example verification.
 set -euo pipefail
 
-export FIREBOLT_USE_CORE=1
-export FIREBOLT_STAGING_MODE=upload
 export FIREBOLT_CORE_URL="${FIREBOLT_CORE_URL:-http://localhost:3473}"
+export FIREBOLT_STAGING_MODE=upload
+unset FIREBOLT_ACCOUNT_NAME 2>/dev/null || true
 
 DATASET="${1:-hn_blog}"
 LIMIT="${2:-30}"

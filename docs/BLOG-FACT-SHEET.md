@@ -1,7 +1,7 @@
 # Blog fact sheet & annotated outline
 
 **Purpose:** Lock claims before redrafting `announcing-dlt-firebolt.md`.  
-**Release target:** [dlt-firebolt 0.2.0 on PyPI](https://pypi.org/project/dlt-firebolt/0.2.0/) ships **with** the blog post — not after.
+**Release target:** [dlt-firebolt 0.3.0 on PyPI](https://pypi.org/project/dlt-firebolt/0.3.0/) ships **with** the blog post — not after.
 
 Benjamin’s DM (June 2026) is **reference only**. Do **not** quote or paraphrase into the public post: Leonard, ingress cost economics, managed upload timeline, “surface the error” as product direction. **Managed does not support upload today** — settled product fact from leadership; not a publish gate.
 
@@ -28,11 +28,12 @@ Benjamin’s DM (June 2026) is **reference only**. Do **not** quote or paraphras
 |---------|-----|
 | Phase 2 merge runs in “one transaction” / atomic rollback | SDK path uses `supports_transactions=False`; atomicity not proven at engine layer |
 | “Works across Firebolt offerings” without qualification | Managed production must use S3 today; upload is Core/local |
-| “No endpoint URL to manage” (blanket) | Core requires `FIREBOLT_USE_CORE=1` + `FIREBOLT_CORE_URL` |
+| “No endpoint URL to manage” (blanket) | Core requires `FIREBOLT_CORE_URL` |
 | Managed upload “coming soon” / timeline | Internal DM only |
 | “Already checking with eng” | Benjamin confirmed managed behavior; optional internal follow-up only |
 | Destination enforces upload size limits client-side | Code does not; cite Firebolt API spec only |
 | Active collaboration with dlt team on core merge | Unless literally true; use community-package framing |
+| “Nested merge verified on Core + managed” | Benjamin removed; managed S3 nested merge not E2E-verified |
 
 ---
 
@@ -47,39 +48,43 @@ Benjamin’s DM (June 2026) is **reference only**. Do **not** quote or paraphras
 
 ---
 
-## Upload size limit (spec-tied wording)
+## Upload size limit (blog wording — Benjamin, June 2026)
 
-From [Upload and query local files](https://docs.firebolt.io/reference-api/uploading-files), Limits section — use verbatim in blog:
+Use plain English in the blog (not the API quote):
 
-> The file parts of one request can hold at most 1 GB of data in total, measured after decompression.
+> Upload supports files up to 1 GB each, measured after decompression. For larger files, use S3 mode.
 
-Add: the destination does **not** enforce this client-side.
+Per-file wording is correct for this destination: `upload_client.py` sends one multipart POST per file. Do **not** restore the verbatim API quote; Benjamin closed that comment.
 
 ---
 
 ## Annotated outline
 
+Benjamin asked for **code-first** order (June 2026): install, config, HN example, **then** two-modes paragraph + table, **then** Under the hood. Do not move modes back to the intro.
+
 ### 1. Intro
-- Two modes upfront: upload for Core/local, S3 for managed production.
+- Gap statement only; no modes table here.
 
-### 2. Two ways to load
-- No “future managed support” in table.
-- pip pin: `pip install "dlt-firebolt>=0.2.0"`.
+### 2. What it does + configuration
+- `pip install "dlt-firebolt>=0.3.0"` + Requires 0.3.0+ line.
+- Split managed vs Core; `FIREBOLT_CORE_URL` auto-selects Core (0.3.0).
 
-### 3. Quick start + configuration
-- Split managed vs Core; no blanket “no endpoint URL”.
-
-### 4. Real example — Hacker News top stories
-- Self-contained: `FIREBOLT_USE_CORE=1` in block; flat fields (no nested surprise).
+### 3. Real example — Hacker News top stories
+- Self-contained: `FIREBOLT_CORE_URL` in block; flat fields (no nested surprise).
 - Real public API, no auth; not GitHub / not MotherDuck parallel.
-- Verified on Core (`scripts/hn_core_e2e.sh hn_blog 30`).
+- Verified on Core (`scripts/hn_core_e2e.sh`).
+
+### 4. Two ways to load (after example, before Under the hood)
+- Two-modes paragraph + table + managed uses `s3` today.
+- No “future managed support” in table.
 
 ### 5. Under the hood
-- Upload: spec-tied 1 GB quote + link; S3 for larger loads.
-- Note: `upload://` is documented on the upload API page, not the general `READ_PARQUET` S3 reference.
+- Upload: plain-English 1 GB per file; S3 for larger loads.
 
 ### 6. Merge
 - Correctness / fixed order; show SQL sequence; no atomicity language.
+- Closing sentence: MERGE is single-table; nested uses uniform delete-insert.
+- Do **not** re-add “Nested merge verified on Core + managed” (Benjamin deleted; managed E2E not run).
 
 ### 7. Availability
 - Community package framing only; no unverified dlt-core collaboration claim.
@@ -91,9 +96,9 @@ Add: the destination does **not** enforce this client-side.
 
 - [x] README updated (managed S3 note, Core env vars, transaction wording fixed)
 - [x] `firebolt_dest/README.md` updated (no transaction overclaim)
-- [x] `firebolt_dest/__version__` = `0.2.0`
-- [ ] Manual twine publish → PyPI 0.2.0
-- [x] Blog `pip install` and PyPI links point at 0.2.0
+- [x] `firebolt_dest/__version__` = `0.3.0`
+- [ ] Manual twine publish → PyPI 0.3.0
+- [x] Blog `pip install` and PyPI links point at 0.3.0
 - [x] Merge section has no atomicity language
 - [x] Wheel built; install-tested via `core_e2e.sh` + `hn_core_e2e.sh`
 - [x] All upload code committed

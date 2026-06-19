@@ -4,7 +4,7 @@ Community [dlt](https://dlthub.com/) destination for [Firebolt](https://www.fire
 
 Load data into Firebolt with dlt using **direct HTTP upload (default)** or **S3 staging + `COPY INTO`** for large loads.
 
-**Requires [dlt-firebolt 0.2.0+](https://pypi.org/project/dlt-firebolt/0.2.0/)** for upload mode. Earlier PyPI releases (0.1.x) support S3 staging only.
+**Requires [dlt-firebolt 0.3.0+](https://pypi.org/project/dlt-firebolt/0.3.0/)** for upload mode and simplified Core/managed configuration.
 
 ## Two ways to load
 
@@ -13,12 +13,12 @@ Load data into Firebolt with dlt using **direct HTTP upload (default)** or **S3 
 | **`upload` (default)** | Firebolt Core, local dev, quick starts | HTTP multipart → `READ_PARQUET('upload://…')` |
 | **`s3`** | **Managed Firebolt production**, large bulk loads | Parquet on S3 → `COPY INTO` |
 
-On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the code default but the managed engine does not accept multipart upload yet; you will get a clear error if you use upload mode there. Upload mode is verified on **Firebolt Core** and local workflows.
+On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the code default but the managed engine does not accept multipart upload yet; you will get a clear error if you use upload mode there. The runner needs AWS credentials to write staging files to S3; Firebolt reads them via your external location. Staging objects are not deleted automatically after `COPY INTO`.
 
 ## Install
 
 ```bash
-pip install "dlt-firebolt>=0.2.0"
+pip install "dlt-firebolt>=0.3.0"
 ```
 
 Requires Python 3.10+.
@@ -57,9 +57,7 @@ Set `FIREBOLT_S3_LOCATION_NAME` (or `s3_location_name` in secrets) to the exact 
 ### Firebolt Core (upload, no S3)
 
 ```bash
-export FIREBOLT_USE_CORE=1
 export FIREBOLT_CORE_URL=http://localhost:3473
-export FIREBOLT_STAGING_MODE=upload   # default
 ```
 
 ```python
@@ -142,8 +140,7 @@ The destination resolves the engine URL from your account; you do not set an HTT
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `FIREBOLT_USE_CORE` | yes | Set to `1` |
-| `FIREBOLT_CORE_URL` | no | Core HTTP endpoint (default: `http://localhost:3473`) |
+| `FIREBOLT_CORE_URL` | yes | Core HTTP endpoint (selects Core when set) |
 | `FIREBOLT_CORE_DATABASE` | no | Database name (default: `firebolt`) |
 | `FIREBOLT_STAGING_MODE` | no | `upload` (default) |
 
@@ -200,6 +197,6 @@ Community package maintained by [Firebolt](https://github.com/firebolt-db/dlt-fi
 - [x] Published on PyPI (`pip install dlt-firebolt`)
 - [x] Append, merge, and replace dispositions
 - [x] Nested multi-table merge
-- [x] HTTP upload mode (0.2.0+, Firebolt Core)
+- [x] HTTP upload mode (0.3.0+, Firebolt Core)
 - [ ] Website integration docs
 - [ ] Optional listing on dlt community destinations page

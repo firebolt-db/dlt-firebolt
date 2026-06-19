@@ -2,7 +2,7 @@
 
 Loads dlt pipelines into Firebolt using **direct HTTP upload (default)** or **S3 staging + `COPY INTO`**.
 
-**Requires dlt-firebolt 0.2.0+** for upload mode. Earlier releases (0.1.x) support S3 staging only.
+**Requires dlt-firebolt 0.3.0+** for upload mode and simplified Core/managed config.
 
 ## Two ways to load
 
@@ -37,7 +37,7 @@ Set `FIREBOLT_S3_LOCATION_NAME` and `FIREBOLT_STAGING_MODE=s3`.
 ## Install
 
 ```bash
-pip install "dlt-firebolt>=0.2.0"
+pip install "dlt-firebolt>=0.3.0"
 ```
 
 Import once so dlt registers the destination:
@@ -51,9 +51,7 @@ import firebolt_dest  # noqa: F401
 ### Firebolt Core
 
 ```
-FIREBOLT_USE_CORE=1
 FIREBOLT_CORE_URL=http://localhost:3473
-FIREBOLT_STAGING_MODE=upload
 ```
 
 ### Managed Firebolt (S3)
