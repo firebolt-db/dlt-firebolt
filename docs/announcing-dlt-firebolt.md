@@ -73,9 +73,7 @@ See the [README](https://github.com/firebolt-db/dlt-firebolt) for the full refer
 
 ### A real pipeline example
 
-Here is a recognizable end-to-end example: GitHub stargazers for a public repo, loaded with merge so reruns stay idempotent. The snippet below matches what we verified on Firebolt Core with upload mode: one page of stargazers (`scripts/github_stars_core_e2e.sh oss_analytics 1`).
-
-Unauthenticated GitHub API access is limited to 60 requests per hour; a token in the request headers raises that limit if you paginate further.
+Here is a short pipeline that loads Hacker News top stories with merge, so reruns refresh scores and comment counts without duplicating rows. Verified on Firebolt Core with upload mode (`scripts/hn_core_e2e.sh hn_blog 30`).
 
 ```python
 import os
@@ -88,38 +86,22 @@ from firebolt_dest.configuration import make_firebolt_pipeline
 os.environ.setdefault("FIREBOLT_USE_CORE", "1")
 os.environ.setdefault("FIREBOLT_CORE_URL", "http://localhost:3473")
 
-GITHUB_REPO = "dlt-hub/dlt"
-MAX_PAGES = 1  # verified run; increase only with a GitHub token
+@dlt.resource(name="hn_top_stories", write_disposition="merge", primary_key="id")
+def hn_top_stories():
+    ids = requests.get(
+        "https://hacker-news.firebaseio.com/v0/topstories.json", timeout=30
+    ).json()
+    for story_id in ids[:30]:
+        item = requests.get(
+            f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json", timeout=30
+        ).json()
+        yield {
+            k: item.get(k)
+            for k in ("id", "title", "by", "score", "descendants", "url", "time")
+        }
 
-@dlt.resource(
-    name="github_stars",
-    write_disposition="merge",
-    primary_key="user_login",
-)
-def github_stars():
-    for page in range(1, MAX_PAGES + 1):
-        response = requests.get(
-            f"https://api.github.com/repos/{GITHUB_REPO}/stargazers",
-            headers={"Accept": "application/vnd.github.v3.star+json"},
-            params={"page": page, "per_page": 100},
-            timeout=30,
-        )
-        response.raise_for_status()
-        rows = response.json()
-        if not rows:
-            break
-        for row in rows:
-            yield {
-                "user_login": row["user"]["login"],
-                "starred_at": row["starred_at"],
-            }
-
-pipeline = make_firebolt_pipeline(
-    pipeline_name="github_to_firebolt",
-    dataset_name="oss_analytics",
-)
-
-pipeline.run(github_stars(), loader_file_format="parquet")
+pipeline = make_firebolt_pipeline(pipeline_name="hackernews", dataset_name="hn")
+pipeline.run(hn_top_stories(), loader_file_format="parquet")
 ```
 
 ## Under the hood

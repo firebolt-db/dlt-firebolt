@@ -12,7 +12,7 @@ Benjamin’s DM (June 2026) is **reference only**. Do **not** quote or paraphras
 | Claim | Environment | Evidence |
 |-------|-------------|----------|
 | HTTP upload loads Parquet via `READ_PARQUET('upload://…')` | Firebolt Core | `scripts/core_e2e.sh` — nested merge v1/v2, spot-checks pass |
-| GitHub stargazers example loads with merge | Firebolt Core, upload | `scripts/github_stars_core_e2e.sh` — `LOADED and contains no failed jobs` |
+| HN top stories example loads with merge | Firebolt Core, upload | `scripts/hn_core_e2e.sh hn_blog 30` |
 | S3 + `COPY INTO` append and nested merge | Managed Firebolt | Earlier session (`allhands` dataset) |
 | Upload returns 400 on managed | Managed Firebolt | Engine: multipart upload not supported; S3/GCS only — expected, not a bug |
 | Default staging mode is `upload` when unset | Code | `staging_mode_from_env()` default `"upload"` |
@@ -69,10 +69,10 @@ Add: the destination does **not** enforce this client-side.
 ### 3. Quick start + configuration
 - Split managed vs Core; no blanket “no endpoint URL”.
 
-### 4. Real example — GitHub stargazers
-- Self-contained: `FIREBOLT_USE_CORE=1` inside the code block.
-- Bounded: `MAX_PAGES = 1` to match verified run; note GitHub rate limits.
-- Verified on Core (`scripts/github_stars_core_e2e.sh oss_analytics 1`).
+### 4. Real example — Hacker News top stories
+- Self-contained: `FIREBOLT_USE_CORE=1` in block; flat fields (no nested surprise).
+- Real public API, no auth; not GitHub / not MotherDuck parallel.
+- Verified on Core (`scripts/hn_core_e2e.sh hn_blog 30`).
 
 ### 5. Under the hood
 - Upload: spec-tied 1 GB quote + link; S3 for larger loads.
@@ -95,7 +95,7 @@ Add: the destination does **not** enforce this client-side.
 - [ ] Manual twine publish → PyPI 0.2.0
 - [x] Blog `pip install` and PyPI links point at 0.2.0
 - [x] Merge section has no atomicity language
-- [x] Wheel built; install-tested via `core_e2e.sh` + `github_stars_core_e2e.sh`
+- [x] Wheel built; install-tested via `core_e2e.sh` + `hn_core_e2e.sh`
 - [x] All upload code committed
 
 ---

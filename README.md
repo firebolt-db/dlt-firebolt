@@ -179,13 +179,8 @@ pytest -m "not integration"
 **Core e2e (upload, no S3):**
 
 ```bash
-bash scripts/core_e2e.sh my_dataset
-```
-
-**GitHub stargazers example (blog):**
-
-```bash
-bash scripts/github_stars_core_e2e.sh oss_analytics 1
+bash scripts/core_e2e.sh my_dataset          # nested merge
+bash scripts/hn_core_e2e.sh hn_blog 30     # blog example
 ```
 
 Optional live integration tests (requires Firebolt, S3, and AWS credentials):
