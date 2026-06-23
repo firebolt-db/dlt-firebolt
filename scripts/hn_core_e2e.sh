@@ -29,8 +29,8 @@ from firebolt_dest.configuration import make_firebolt_pipeline
 dataset, limit = sys.argv[1], int(sys.argv[2])
 
 
-@dlt.resource(name="hn_top_stories", write_disposition="merge", primary_key="id")
-def hn_top_stories():
+@dlt.resource(name="top_stories", write_disposition="merge", primary_key="id")
+def top_stories():
     ids = requests.get(
         "https://hacker-news.firebaseio.com/v0/topstories.json",
         timeout=30,
@@ -50,8 +50,8 @@ pipeline = make_firebolt_pipeline(
     pipeline_name="hackernews",
     dataset_name=dataset,
 )
-info = pipeline.run(hn_top_stories(), loader_file_format="parquet")
+info = pipeline.run(top_stories(), loader_file_format="parquet")
 print(info)
 assert not info.has_failed_jobs, info
-print(f"OK: hn_top_stories loaded on Core ({limit} stories)")
+print(f"OK: top_stories loaded on Core → table {dataset}_top_stories ({limit} stories)")
 PY

@@ -13,7 +13,7 @@ Load data into Firebolt with dlt using **direct HTTP upload (default)** or **S3 
 | **`upload` (default)** | Firebolt Core, local dev, quick starts | HTTP multipart → `READ_PARQUET('upload://…')` |
 | **`s3`** | **Managed Firebolt production**, large bulk loads | Parquet on S3 → `COPY INTO` |
 
-On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the code default but the managed engine does not accept multipart upload yet; you will get a clear error if you use upload mode there. The runner needs AWS credentials to write staging files to S3; Firebolt reads them via your external location. Staging objects are not deleted automatically after `COPY INTO`.
+On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the code default but the managed engine does not accept multipart upload yet; you will get a clear error if you use upload mode there.
 
 ## Install
 
@@ -51,6 +51,8 @@ CREATE LOCATION "your_location_name" WITH
 ```
 
 Set `FIREBOLT_S3_LOCATION_NAME` (or `s3_location_name` in secrets) to the exact location name from `CREATE LOCATION`. Set `FIREBOLT_STAGING_MODE=s3`.
+
+The machine running dlt needs AWS credentials that can write to the staging bucket (via environment variables, an AWS profile, or an attached IAM role). Firebolt reads the staged files from the external location you configured, not the runner's AWS identity. Staging Parquet is not automatically deleted after `COPY INTO`, so add an S3 lifecycle rule or a periodic cleanup if you don't want objects to accumulate.
 
 ## Quick start
 

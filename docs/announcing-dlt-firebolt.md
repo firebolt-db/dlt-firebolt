@@ -31,7 +31,7 @@ S3_BUCKET=your-staging-bucket
 FIREBOLT_S3_LOCATION_NAME=your-location-name
 ```
 
-The destination resolves the engine URL from your account. The machine running dlt needs AWS credentials that can write to the staging bucket (environment variables, an AWS profile, or an attached IAM role); Firebolt reads the staged files through the external location you configured, not the runner's AWS identity. Staging Parquet is not deleted automatically after `COPY INTO`, so add an S3 lifecycle rule or periodic cleanup if you don't want objects to accumulate.
+The destination resolves the engine URL from your account. See the [README](https://github.com/firebolt-db/dlt-firebolt) for S3 staging setup, AWS credentials, and lifecycle cleanup.
 
 **Firebolt Core (upload data over HTTP):**
 
@@ -57,8 +57,8 @@ from firebolt_dest.configuration import make_firebolt_pipeline
 
 os.environ.setdefault("FIREBOLT_CORE_URL", "http://localhost:3473")
 
-@dlt.resource(name="hn_top_stories", write_disposition="merge", primary_key="id")
-def hn_top_stories():
+@dlt.resource(name="top_stories", write_disposition="merge", primary_key="id")
+def top_stories():
     ids = requests.get(
         "https://hacker-news.firebaseio.com/v0/topstories.json", timeout=30
     ).json()
@@ -72,7 +72,7 @@ def hn_top_stories():
         }
 
 pipeline = make_firebolt_pipeline(pipeline_name="hackernews", dataset_name="hn")
-pipeline.run(hn_top_stories(), loader_file_format="parquet")
+pipeline.run(top_stories(), loader_file_format="parquet")
 ```
 
 The destination supports two staging modes. **Upload mode** sends Parquet straight to Firebolt over HTTP, with no S3 bucket, no external location, and no AWS credentials for the load step. It is the default and works today on **Firebolt Core** and local dev. **S3 mode** stages Parquet in your bucket and loads with `COPY INTO`; use it for **managed Firebolt production** and large bulk loads.
