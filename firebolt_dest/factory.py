@@ -142,6 +142,7 @@ class firebolt(Destination[FireboltClientConfiguration, "FireboltClient"]):
         self,
         credentials: Union[FireboltCredentials, Dict[str, Any], str] = None,
         s3_location_name: str = "firebolt_s3",
+        s3_location_url: str = "",
         s3_prefix: str = "dlt-landing",
         staging_mode: str = "upload",
         destination_name: str = None,
@@ -151,6 +152,7 @@ class firebolt(Destination[FireboltClientConfiguration, "FireboltClient"]):
         super().__init__(
             credentials=credentials,
             s3_location_name=s3_location_name,
+            s3_location_url=s3_location_url,
             s3_prefix=s3_prefix,
             staging_mode=staging_mode,
             destination_name=destination_name,

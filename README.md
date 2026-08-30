@@ -50,7 +50,9 @@ CREATE LOCATION "your_location_name" WITH
   CREDENTIALS = (AWS_ROLE_ARN = 'arn:aws:iam::...:role/...');
 ```
 
-Set `FIREBOLT_S3_LOCATION_NAME` (or `s3_location_name` in secrets) to the exact location name from `CREATE LOCATION`. Set `FIREBOLT_STAGING_MODE=s3`.
+Set `FIREBOLT_S3_LOCATION_NAME` to the exact location name. Set `S3_PREFIX` to the same key prefix as the LOCATION URL path for classic single-tenant setups (COPY `PATTERN` is relative to the LOCATION path). Set `FIREBOLT_STAGING_MODE=s3`.
+
+**Multi-tenant (one LOCATION for all tenants):** create the LOCATION at the **bucket root** (`URL = 's3://your-bucket/'`), set `FIREBOLT_S3_LOCATION_URL=s3://your-bucket/`, and set per-tenant `S3_PREFIX=<tenant>` (staging writes under `s3://bucket/<tenant>/...`). COPY `PATTERN` keeps the tenant segment (e.g. `colpal/dlt/staging/...`). Existing prefix-LOCATION setups that omit `FIREBOLT_S3_LOCATION_URL` keep working unchanged (LOCATION path falls back to `S3_PREFIX`).
 
 The machine running dlt needs AWS credentials that can write to the staging bucket (via environment variables, an AWS profile, or an attached IAM role). Firebolt reads the staged files from the external location you configured, not the runner's AWS identity. Staging Parquet is not automatically deleted after `COPY INTO`, so add an S3 lifecycle rule or a periodic cleanup if you don't want objects to accumulate.
 
@@ -106,6 +108,9 @@ Example for managed Firebolt (S3 mode):
 staging_mode = "s3"
 s3_location_name = "your_location_name"
 s3_prefix = "dlt-landing"
+# For multi-tenant bucket-root LOCATION:
+# s3_location_url = "s3://your-bucket/"
+# s3_prefix = "colpal"
 
 [destination.firebolt.credentials]
 host = "YOUR_FIREBOLT_DATABASE"
@@ -133,8 +138,9 @@ See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
 | `FIREBOLT_ENGINE` | yes | Engine name |
 | `FIREBOLT_STAGING_MODE` | no | `s3` for managed production (recommended) |
 | `FIREBOLT_S3_LOCATION_NAME` | s3 mode | Firebolt external location name |
+| `FIREBOLT_S3_LOCATION_URL` | no | LOCATION URL for PATTERN (e.g. `s3://bucket/`); empty → use `S3_PREFIX` as LOCATION path |
 | `S3_BUCKET` | s3 mode | Staging bucket |
-| `S3_PREFIX` | no | Key prefix (default: `dlt-landing`) |
+| `S3_PREFIX` | no | Staging key prefix (default: `dlt-landing`); per-tenant prefix when LOCATION is at bucket root |
 
 The destination resolves the engine URL from your account; you do not set an HTTP endpoint manually.
 

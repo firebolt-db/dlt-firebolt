@@ -76,8 +76,14 @@ class FireboltClientConfiguration(DestinationClientDwhWithStagingConfiguration):
     """Firebolt Core HTTP endpoint when use_core is True."""
     s3_location_name: str = "firebolt_s3"
     """Firebolt external location name (CREATE LOCATION ...). Required for s3 mode."""
+    s3_location_url: str = ""
+    """LOCATION URL (e.g. s3://bucket/ or s3://bucket/prefix/). PATTERN is relative to this
+    path. Empty → fall back to s3_prefix as the LOCATION path (classic single-tenant).
+    For multi-tenant bucket-root LOCATION set this to s3://your-bucket/ and keep s3_prefix
+    as the per-tenant staging prefix."""
     s3_prefix: str = "dlt-landing"
-    """Object key prefix inside the location URL, used to build COPY PATTERN."""
+    """Staging key prefix under the bucket (where dlt writes Parquet). Not used to strip
+    PATTERN when s3_location_url is set to the bucket root."""
 
     def fingerprint(self) -> str:
         if self.credentials and self.credentials.database:
@@ -119,6 +125,10 @@ def firebolt_core_url_from_env() -> str:
 
 def s3_location_name_from_env() -> str:
     return os.environ.get("FIREBOLT_S3_LOCATION_NAME", "firebolt_s3").strip()
+
+
+def s3_location_url_from_env() -> str:
+    return os.environ.get("FIREBOLT_S3_LOCATION_URL", "").strip()
 
 
 def s3_prefix_from_env() -> str:
@@ -207,6 +217,9 @@ def make_firebolt_pipeline(
     }
     if mode == "s3":
         dest_kwargs["s3_location_name"] = s3_location_name_from_env()
+        loc_url = s3_location_url_from_env()
+        if loc_url:
+            dest_kwargs["s3_location_url"] = loc_url
 
     return dlt.pipeline(
         pipeline_name=pipeline_name,
