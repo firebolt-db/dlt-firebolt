@@ -78,6 +78,10 @@ class FireboltClientConfiguration(DestinationClientDwhWithStagingConfiguration):
     """Firebolt external location name (CREATE LOCATION ...). Required for s3 mode."""
     s3_prefix: str = "dlt-landing"
     """Object key prefix inside the location URL, used to build COPY PATTERN."""
+    use_schema_per_dataset: bool = False
+    """When True, map dataset_name to a real Firebolt schema (schema.table).
+    Default False keeps today's behavior: tables as public.{dataset}_{table}.
+    See FB-3446. Breaking if enabled against an existing public-prefix layout."""
 
     def fingerprint(self) -> str:
         if self.credentials and self.credentials.database:
@@ -123,6 +127,14 @@ def s3_location_name_from_env() -> str:
 
 def s3_prefix_from_env() -> str:
     return os.environ.get("S3_PREFIX", "dlt-landing").strip().strip("/")
+
+
+def use_schema_per_dataset_from_env() -> bool:
+    return os.environ.get("FIREBOLT_USE_SCHEMA_PER_DATASET", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def s3_bucket_from_env() -> str:
@@ -204,6 +216,7 @@ def make_firebolt_pipeline(
         "s3_prefix": s3_prefix_from_env(),
         "use_core": use_core,
         "core_url": core_url_from_env() if use_core else "",
+        "use_schema_per_dataset": use_schema_per_dataset_from_env(),
     }
     if mode == "s3":
         dest_kwargs["s3_location_name"] = s3_location_name_from_env()

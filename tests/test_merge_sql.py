@@ -12,8 +12,7 @@ from firebolt_dest.configuration import FireboltCredentials
 from firebolt_dest.sql_client import FireboltSqlClient
 
 
-@pytest.fixture
-def firebolt_sql_client() -> FireboltSqlClient:
+def _sql_client(*, use_schema_per_dataset: bool = False) -> FireboltSqlClient:
     caps = DestinationCapabilitiesContext()
     caps.escape_identifier = escape_postgres_identifier
     caps.casefold_identifier = str.lower
@@ -21,7 +20,19 @@ def firebolt_sql_client() -> FireboltSqlClient:
     caps.supported_merge_strategies = ["delete-insert"]
     creds = FireboltCredentials()
     creds.database = "db"
-    return FireboltSqlClient("demo", "demo_staging", creds, caps)
+    return FireboltSqlClient(
+        "demo",
+        "demo_staging",
+        creds,
+        caps,
+        use_schema_per_dataset=use_schema_per_dataset,
+    )
+
+
+@pytest.fixture
+def firebolt_sql_client() -> FireboltSqlClient:
+    """Default (flag off) client — preserves historic public-prefix assertions."""
+    return _sql_client(use_schema_per_dataset=False)
 
 
 def _items_table(*, write_disposition: str, replace_strategy: str | None = None) -> dict:
@@ -54,6 +65,19 @@ def test_merge_sql_delete_insert(firebolt_sql_client: FireboltSqlClient) -> None
     assert "ROW_NUMBER() OVER" in joined
 
 
+def test_merge_sql_delete_insert_schema_per_dataset() -> None:
+    client = _sql_client(use_schema_per_dataset=True)
+    sql = FireboltMergeJob.generate_sql([_items_table(write_disposition="merge")], client)
+    joined = "\n".join(sql)
+
+    assert 'DELETE FROM "demo"."items"' in joined
+    assert '"demo_staging"."items"' in joined
+    assert 'INSERT INTO "demo"."items"' in joined
+    assert "ROW_NUMBER() OVER" in joined
+    assert "public" not in joined
+    assert "demo_items" not in joined
+
+
 def test_replace_insert_from_staging_sql(firebolt_sql_client: FireboltSqlClient) -> None:
     table = _items_table(write_disposition="replace", replace_strategy="insert-from-staging")
     sql = SqlStagingReplaceFollowupJob.generate_sql([table], firebolt_sql_client)
@@ -62,6 +86,21 @@ def test_replace_insert_from_staging_sql(firebolt_sql_client: FireboltSqlClient)
     assert 'TRUNCATE TABLE "demo_items"' in joined
     assert 'INSERT INTO "demo_items"' in joined
     assert 'FROM "demo_staging_items"' in joined
+
+
+def test_replace_insert_from_staging_sql_schema_per_dataset() -> None:
+    client = _sql_client(use_schema_per_dataset=True)
+    table = _items_table(write_disposition="replace", replace_strategy="insert-from-staging")
+    sql = SqlStagingReplaceFollowupJob.generate_sql([table], client)
+    joined = "\n".join(sql)
+
+    # Schema mode must not emit TRUNCATE / bare DELETE (Core silent no-ops).
+    assert 'DELETE FROM "demo"."items" WHERE 1=1' in joined
+    assert "TRUNCATE" not in joined.upper()
+    assert 'DELETE FROM "demo"."items";' not in joined.replace(" WHERE 1=1", "")
+    assert 'INSERT INTO "demo"."items"' in joined
+    assert 'FROM "demo_staging"."items"' in joined
+    assert "public" not in joined
 
 
 def _orders_table_chain() -> list[dict]:
@@ -112,3 +151,16 @@ def test_nested_merge_uses_regular_tables_not_temp(firebolt_sql_client: Firebolt
     assert 'CREATE TABLE "demo_orders_insert_' in joined
     assert 'INSERT INTO "demo_orders__items"' in joined
     assert joined.count("DROP TABLE IF EXISTS") >= 4
+
+
+def test_nested_merge_schema_per_dataset() -> None:
+    client = _sql_client(use_schema_per_dataset=True)
+    sql = FireboltMergeJob.generate_sql(_orders_table_chain(), client)
+    joined = "\n".join(sql)
+
+    assert "CREATE TEMPORARY TABLE" not in joined.upper()
+    assert 'CREATE TABLE "demo"."orders_delete_' in joined
+    assert 'CREATE TABLE "demo"."orders_insert_' in joined
+    assert 'INSERT INTO "demo"."orders__items"' in joined
+    assert joined.count("DROP TABLE IF EXISTS") >= 4
+    assert "public" not in joined

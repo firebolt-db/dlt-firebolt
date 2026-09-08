@@ -157,6 +157,7 @@ class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
             staging_dataset_name,
             config.credentials,
             capabilities,
+            use_schema_per_dataset=config.use_schema_per_dataset,
         )
         super().__init__(schema, config, sql_client)
         self.config: FireboltClientConfiguration = config

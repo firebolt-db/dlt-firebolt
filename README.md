@@ -83,7 +83,7 @@ pipeline.run(orders(), loader_file_format="parquet")
 
 Set service-account credentials and `FIREBOLT_STAGING_MODE=s3` (see [Configuration](#configuration)). The same pipeline code applies; only env vars change.
 
-Tables are created as `{dataset}_{table}` (for example `my_dataset_orders`).
+Tables are created as `{dataset}_{table}` in the `public` schema (for example `my_dataset_orders`). To use a real Firebolt schema instead (`my_dataset.orders`), set `FIREBOLT_USE_SCHEMA_PER_DATASET=true` — see [Configuration](#configuration).
 
 ### Using `.dlt/secrets.toml`
 
@@ -106,6 +106,7 @@ Example for managed Firebolt (S3 mode):
 staging_mode = "s3"
 s3_location_name = "your_location_name"
 s3_prefix = "dlt-landing"
+# use_schema_per_dataset = false  # opt-in real schemas (FB-3446); default off
 
 [destination.firebolt.credentials]
 host = "YOUR_FIREBOLT_DATABASE"
@@ -135,8 +136,39 @@ See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
 | `FIREBOLT_S3_LOCATION_NAME` | s3 mode | Firebolt external location name |
 | `S3_BUCKET` | s3 mode | Staging bucket |
 | `S3_PREFIX` | no | Key prefix (default: `dlt-landing`) |
+| `FIREBOLT_USE_SCHEMA_PER_DATASET` | no | `true` to map `dataset_name` to a real Firebolt schema (default: off — tables stay `public.{dataset}_{table}`) |
 
 The destination resolves the engine URL from your account; you do not set an HTTP endpoint manually.
+
+#### Schema-per-dataset (opt-in, FB-3446)
+
+**Default is off.** Existing pipelines keep writing `public.{dataset}_{table}` and store dlt state tables (`_dlt_loads`, `_dlt_pipeline_state`, `_dlt_version`) under that public-prefix naming. Enabling the flag is a **deliberate breaking change** for that layout:
+
+| | Flag off (default) | Flag on |
+|--|--------------------|---------|
+| Table name | `public.tenant_a_orders` | `tenant_a.orders` |
+| Staging | `public.tenant_a_staging_*` | schema `tenant_a_staging` |
+| dlt state | `public.{dataset}__dlt_*` | `{dataset}._dlt_*` |
+
+Turning the flag **ON** gives the pipeline **fresh dlt state** under the new dataset schema (state tables are not carried over from `public`). Plan a cutover if you need history.
+
+Firebolt does **not** support `ALTER TABLE … SET SCHEMA`, and `ALTER TABLE … RENAME TO` cannot rename across schemas. To bring **existing data** from the old public-prefix layout into the new schema, Firebolt’s recommended path is a **zero-copy** [`CREATE TABLE … CLONE`](https://docs.firebolt.io/reference-sql/commands/data-definition/create-table-clone) (metadata-level; near-instant; no extra storage), then drop the old table:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS tenant_a;
+CREATE TABLE tenant_a.orders CLONE public.tenant_a_orders;
+-- verify row counts / spot-check, then:
+DROP TABLE public.tenant_a_orders;
+```
+
+Repeat per table you want to keep. External tables cannot be cloned — recreate them in the target schema. **Firebolt Core does not support `CLONE`** (verified on Core 5.0.1); on Core use CTAS instead:
+
+```sql
+CREATE TABLE tenant_a.orders AS SELECT * FROM public.tenant_a_orders;
+DROP TABLE public.tenant_a_orders;
+```
+
+State tables are usually not worth migrating: enable the flag and accept a fresh incremental cursor under the new schema.
 
 ### Firebolt Core
 
