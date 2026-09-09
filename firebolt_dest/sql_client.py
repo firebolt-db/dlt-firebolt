@@ -136,7 +136,7 @@ class FireboltSqlClient(SqlClientBase[Connection]):
 
     def has_dataset(self) -> bool:
         # Firebolt supports real schemas, but this connector maps dataset_name to a
-        # table-name prefix in `public` (not to a Firebolt schema). See FB-3446.
+        # table-name prefix in `public` (not to a Firebolt schema).
         return True
 
     def create_dataset(self) -> None:

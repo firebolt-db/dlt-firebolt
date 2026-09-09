@@ -82,8 +82,9 @@ class FireboltClientConfiguration(DestinationClientDwhWithStagingConfiguration):
     For multi-tenant bucket-root LOCATION set this to s3://your-bucket/ and keep s3_prefix
     as the per-tenant staging prefix."""
     s3_prefix: str = "dlt-landing"
-    """Staging key prefix under the bucket (where dlt writes Parquet). Not used to strip
-    PATTERN when s3_location_url is set to the bucket root."""
+    """Staging key prefix under the bucket (where dlt writes Parquet). Unused for PATTERN
+    stripping whenever s3_location_url is set (PATTERN is relative to that LOCATION URL);
+    only used as the LOCATION-path fallback when s3_location_url is empty."""
 
     def fingerprint(self) -> str:
         if self.credentials and self.credentials.database:

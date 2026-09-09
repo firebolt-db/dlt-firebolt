@@ -3,6 +3,7 @@
 from urllib.parse import urlparse
 
 import pytest
+from dlt.common.exceptions import TerminalValueError
 
 from firebolt_dest.copy_sql import (
     gen_firebolt_copy_sql,
@@ -29,29 +30,29 @@ def test_s3_url_to_copy_pattern_classic_matches_original() -> None:
         assert got == _original_s3_url_to_copy_pattern(url, "dlt-landing")
 
 
-def test_s3_url_to_copy_pattern_fieldassist_bucket_root_keeps_tenant() -> None:
-    """Bucket-root LOCATION + tenant key → PATTERN keeps colpal/ (FA acceptance)."""
-    url = "s3://fieldassist-firebolt-staging/colpal/dlt/staging/tenant_colpal/file.parquet"
+def test_s3_url_to_copy_pattern_bucket_root_keeps_tenant() -> None:
+    """Bucket-root LOCATION + tenant key → PATTERN keeps tenant-a/."""
+    url = "s3://example-bucket/tenant-a/dlt/staging/my_dataset/file.parquet"
     assert (
-        s3_url_to_copy_pattern(url, "s3://fieldassist-firebolt-staging/")
-        == "colpal/dlt/staging/tenant_colpal/file.parquet"
+        s3_url_to_copy_pattern(url, "s3://example-bucket/")
+        == "tenant-a/dlt/staging/my_dataset/file.parquet"
     )
     # Empty / root location_url also means bucket root.
     assert (
         s3_url_to_copy_pattern(url, "")
-        == "colpal/dlt/staging/tenant_colpal/file.parquet"
+        == "tenant-a/dlt/staging/my_dataset/file.parquet"
     )
     assert (
-        s3_url_to_copy_pattern(url, "s3://fieldassist-firebolt-staging")
-        == "colpal/dlt/staging/tenant_colpal/file.parquet"
+        s3_url_to_copy_pattern(url, "s3://example-bucket")
+        == "tenant-a/dlt/staging/my_dataset/file.parquet"
     )
 
 
 def test_s3_url_to_copy_pattern_location_at_tenant_prefix() -> None:
-    """LOCATION at s3://bucket/colpal/ → strip loc path only (classic per-tenant LOCATION)."""
-    url = "s3://my-bucket/colpal/dlt/staging/foo.parquet"
+    """LOCATION at s3://bucket/tenant-a/ → strip loc path only (classic per-tenant LOCATION)."""
+    url = "s3://my-bucket/tenant-a/dlt/staging/foo.parquet"
     assert (
-        s3_url_to_copy_pattern(url, "s3://my-bucket/colpal/")
+        s3_url_to_copy_pattern(url, "s3://my-bucket/tenant-a/")
         == "dlt/staging/foo.parquet"
     )
 
@@ -64,21 +65,55 @@ def test_s3_url_to_copy_pattern_bucket_root_no_prefix() -> None:
 
 def test_s3_url_to_copy_pattern_not_under_location_raises() -> None:
     url = "s3://my-bucket/tenant-a/dlt/staging/file.parquet"
-    with pytest.raises(ValueError, match="not under the LOCATION URL path"):
+    with pytest.raises(TerminalValueError, match="not under the LOCATION URL path"):
         s3_url_to_copy_pattern(url, "s3://my-bucket/other-prefix/")
+    with pytest.raises(TerminalValueError, match="s3_prefix"):
+        s3_url_to_copy_pattern(url, "other-prefix")
+    # Still a ValueError subclass so broad handlers remain compatible.
     with pytest.raises(ValueError, match="Refusing basename fallback"):
         s3_url_to_copy_pattern(url, "other-prefix")
+
+
+def test_s3_url_to_copy_pattern_wrong_bucket_raises() -> None:
+    """LOCATION on a different bucket than the staged object must not silently pattern."""
+    url = "s3://example-bucket/tenant-a/dlt/staging/file.parquet"
+    with pytest.raises(TerminalValueError, match="does not match LOCATION URL bucket"):
+        s3_url_to_copy_pattern(url, "s3://other-bucket/")
+    with pytest.raises(ValueError, match="wrong bucket"):
+        s3_url_to_copy_pattern(url, "s3://other-bucket/")
+
+
+def test_s3_url_to_copy_pattern_rejects_glob_metacharacters() -> None:
+    """Glob metacharacters in the resolved PATTERN are a tenant-isolation hazard."""
+    url = "s3://example-bucket/tenant-*/dlt/staging/file.parquet"
+    with pytest.raises(TerminalValueError, match="glob metacharacters"):
+        s3_url_to_copy_pattern(url, "s3://example-bucket/")
+    # '[' is also rejected (urlparse treats '?' as query delimiter, so test '[').
+    url_bracket = "s3://example-bucket/tenant-[ab]/dlt/staging/file.parquet"
+    with pytest.raises(TerminalValueError, match=r"\["):
+        s3_url_to_copy_pattern(url_bracket, "s3://example-bucket/")
+
+
+def test_gen_firebolt_copy_sql_escapes_apostrophe_in_pattern() -> None:
+    sql = gen_firebolt_copy_sql(
+        "my_dataset_orders",
+        location_name="firebolt_s3",
+        pattern="tenant-a/dlt/staging/o'brien.parquet",
+        file_format="parquet",
+    )
+    assert "PATTERN = 'tenant-a/dlt/staging/o''brien.parquet'" in sql
+    assert "CREDENTIALS" not in sql
 
 
 def test_gen_firebolt_copy_sql() -> None:
     sql = gen_firebolt_copy_sql(
         "demo_hubspot_contacts",
         location_name="firebolt_s3",
-        pattern="dlt/staging/*.parquet",
+        pattern="dlt/staging/file.parquet",
         file_format="parquet",
     )
     assert "COPY INTO demo_hubspot_contacts" in sql
     assert "FROM firebolt_s3" in sql
     assert "TYPE = PARQUET" in sql
-    assert "dlt/staging/*.parquet" in sql
+    assert "dlt/staging/file.parquet" in sql
     assert "CREDENTIALS" not in sql

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Added: multi-tenant bucket-root LOCATION support via `s3_location_url` /
+  `FIREBOLT_S3_LOCATION_URL`. COPY `PATTERN` is relative to the LOCATION URL
+  path (not stripped against `s3_prefix`), so one LOCATION at `s3://bucket/`
+  can serve per-tenant staging prefixes. Classic prefix-LOCATION setups that
+  omit `s3_location_url` keep the previous `s3_prefix`-as-LOCATION-path
+  fallback.
+- Fixed: LOCATION/object bucket mismatch, path mismatch, and glob
+  metacharacters in the resolved PATTERN now raise `TerminalValueError`
+  (terminal — not retried by dlt). Apostrophes in PATTERN are SQL-escaped.
+- Docs: clarified which env vars apply to `from_secrets=False` vs TOML /
+  `DESTINATION__FIREBOLT__*`; noted that a bucket-root LOCATION is not an
+  authorization boundary across prefixes.
+
 ## 0.3.1
 
 - Fixed: `TypeError: not all arguments converted during string formatting` on
