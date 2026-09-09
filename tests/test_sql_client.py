@@ -94,7 +94,7 @@ def test_execute_query_defers_rollback_to_begin_transaction() -> None:
     client._conn.rollback.assert_called_once()
 
 
-# --- schema-per-dataset (FB-3446) -------------------------------------------------
+# --- schema-per-dataset -------------------------------------------------
 
 
 def test_make_qualified_table_name_path_flag_off_matches_original() -> None:
@@ -170,11 +170,11 @@ def test_create_dataset_flag_on_emits_create_schema() -> None:
 
 
 def test_drop_dataset_flag_on_emits_drop_schema_cascade() -> None:
-    """Match dlt SqlClientBase: DROP SCHEMA ... CASCADE."""
+    """Schema-mode drops are idempotent (IF EXISTS) so missing staging cannot raise."""
     client = _client(use_schema_per_dataset=True)
     client.execute_sql = MagicMock()
     client.drop_dataset()
-    client.execute_sql.assert_called_once_with('DROP SCHEMA "demo" CASCADE')
+    client.execute_sql.assert_called_once_with('DROP SCHEMA IF EXISTS "demo" CASCADE')
 
 
 def test_has_dataset_flag_on_queries_schemata() -> None:
@@ -204,7 +204,7 @@ def test_staging_dataset_becomes_schema_when_flag_on() -> None:
             'CREATE SCHEMA IF NOT EXISTS "demo_staging"'
         )
         client.drop_dataset()
-        client.execute_sql.assert_called_with('DROP SCHEMA "demo_staging" CASCADE')
+        client.execute_sql.assert_called_with('DROP SCHEMA IF EXISTS "demo_staging" CASCADE')
 
 
 @pytest.mark.parametrize("use_schema_per_dataset", [False, True])
@@ -242,3 +242,40 @@ def test_truncate_table_sql_flag_on_emits_delete_where_1eq1() -> None:
     assert sql == 'DELETE FROM "demo"."orders" WHERE 1=1'
     assert "TRUNCATE" not in sql.upper()
     assert "WHERE 1=1" in sql
+
+
+def test_protected_dataset_schema_rejected_when_flag_on() -> None:
+    from dlt.common.exceptions import TerminalValueError
+    from dlt.common.schema import Schema
+    from firebolt_dest.client import FireboltClient
+    from firebolt_dest.configuration import FireboltClientConfiguration, FireboltCredentials
+    from firebolt_dest.factory import firebolt as firebolt_destination
+
+    creds = FireboltCredentials()
+    creds.database = "firebolt"
+    cfg = FireboltClientConfiguration()
+    cfg.credentials = creds
+    cfg.dataset_name = "public"
+    cfg.use_schema_per_dataset = True
+    caps = firebolt_destination()._raw_capabilities()
+    with pytest.raises(TerminalValueError, match="refuses dataset schema 'public'"):
+        FireboltClient(Schema("public"), cfg, caps)
+
+
+def test_protected_staging_schema_rejected_when_flag_on() -> None:
+    from dlt.common.exceptions import TerminalValueError
+    from dlt.common.schema import Schema
+    from firebolt_dest.client import FireboltClient
+    from firebolt_dest.configuration import FireboltClientConfiguration, FireboltCredentials
+    from firebolt_dest.factory import firebolt as firebolt_destination
+
+    creds = FireboltCredentials()
+    creds.database = "firebolt"
+    cfg = FireboltClientConfiguration()
+    cfg.credentials = creds
+    cfg.dataset_name = "demo"
+    cfg.use_schema_per_dataset = True
+    cfg.staging_dataset_name_layout = "public"
+    caps = firebolt_destination()._raw_capabilities()
+    with pytest.raises(TerminalValueError, match="refuses staging schema 'public'"):
+        FireboltClient(Schema("demo"), cfg, caps)

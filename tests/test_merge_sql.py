@@ -12,7 +12,11 @@ from firebolt_dest.configuration import FireboltCredentials
 from firebolt_dest.sql_client import FireboltSqlClient
 
 
-def _sql_client(*, use_schema_per_dataset: bool = False) -> FireboltSqlClient:
+def _sql_client(
+    *,
+    use_schema_per_dataset: bool = False,
+    dataset_name: str = "demo",
+) -> FireboltSqlClient:
     caps = DestinationCapabilitiesContext()
     caps.escape_identifier = escape_postgres_identifier
     caps.casefold_identifier = str.lower
@@ -20,9 +24,10 @@ def _sql_client(*, use_schema_per_dataset: bool = False) -> FireboltSqlClient:
     caps.supported_merge_strategies = ["delete-insert"]
     creds = FireboltCredentials()
     creds.database = "db"
+    staging = f"{dataset_name}_staging"
     return FireboltSqlClient(
-        "demo",
-        "demo_staging",
+        dataset_name,
+        staging,
         creds,
         caps,
         use_schema_per_dataset=use_schema_per_dataset,
@@ -150,7 +155,24 @@ def test_nested_merge_uses_regular_tables_not_temp(firebolt_sql_client: Firebolt
     assert 'CREATE TABLE "demo_orders_delete_' in joined
     assert 'CREATE TABLE "demo_orders_insert_' in joined
     assert 'INSERT INTO "demo_orders__items"' in joined
-    assert joined.count("DROP TABLE IF EXISTS") >= 4
+    # CREATE is embedded in "DROP ...; CREATE TABLE <name> AS ..." statements.
+    delete_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_delete_" in s
+    )
+    insert_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_insert_" in s
+    )
+    # One DROP before CREATE (same stmt) + one trailing cleanup DROP.
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {delete_name}" in s) == 2
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {insert_name}" in s) == 2
+    assert set(sql[-2:]) == {
+        f"DROP TABLE IF EXISTS {delete_name}",
+        f"DROP TABLE IF EXISTS {insert_name}",
+    }
 
 
 def test_nested_merge_schema_per_dataset() -> None:
@@ -162,5 +184,50 @@ def test_nested_merge_schema_per_dataset() -> None:
     assert 'CREATE TABLE "demo"."orders_delete_' in joined
     assert 'CREATE TABLE "demo"."orders_insert_' in joined
     assert 'INSERT INTO "demo"."orders__items"' in joined
-    assert joined.count("DROP TABLE IF EXISTS") >= 4
     assert "public" not in joined
+    delete_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_delete_" in s
+    )
+    insert_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_insert_" in s
+    )
+    assert delete_name.startswith('"demo"."orders_delete_')
+    assert insert_name.startswith('"demo"."orders_insert_')
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {delete_name}" in s) == 2
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {insert_name}" in s) == 2
+    assert set(sql[-2:]) == {
+        f"DROP TABLE IF EXISTS {delete_name}",
+        f"DROP TABLE IF EXISTS {insert_name}",
+    }
+
+
+def test_nested_merge_schema_per_dataset_whitespace_dataset_drops_helpers() -> None:
+    """Whitespace in the schema name must not orphan helper tables (no regex recovery)."""
+    client = _sql_client(use_schema_per_dataset=True, dataset_name="tenant a")
+    sql = FireboltMergeJob.generate_sql(_orders_table_chain(), client)
+    joined = "\n".join(sql)
+
+    assert 'CREATE TABLE "tenant a"."orders_delete_' in joined
+    assert 'CREATE TABLE "tenant a"."orders_insert_' in joined
+    delete_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_delete_" in s
+    )
+    insert_name = next(
+        s.split("CREATE TABLE ", 1)[1].split(" AS ", 1)[0].strip()
+        for s in sql
+        if "CREATE TABLE " in s and "_insert_" in s
+    )
+    assert delete_name.startswith('"tenant a"."orders_delete_')
+    assert insert_name.startswith('"tenant a"."orders_insert_')
+    assert set(sql[-2:]) == {
+        f"DROP TABLE IF EXISTS {delete_name}",
+        f"DROP TABLE IF EXISTS {insert_name}",
+    }
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {delete_name}" in s) == 2
+    assert sum(1 for s in sql if f"DROP TABLE IF EXISTS {insert_name}" in s) == 2

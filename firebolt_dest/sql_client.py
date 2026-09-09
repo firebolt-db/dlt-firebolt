@@ -135,7 +135,7 @@ class FireboltSqlClient(SqlClientBase[Connection]):
             # "schema"."table" (no predicate) are accepted but silently no-op, so
             # replace-disposition loads accumulate rows. DELETE ... WHERE 1=1
             # clears correctly on Core and is also safe on managed. Do not
-            # "simplify" this to TRUNCATE or bare DELETE. (FB-3446)
+            # "simplify" this to TRUNCATE or bare DELETE.
             return f"DELETE FROM {qualified_table_name} WHERE 1=1"
         return super()._truncate_table_sql(qualified_table_name)
 
@@ -153,8 +153,8 @@ class FireboltSqlClient(SqlClientBase[Connection]):
 
     def has_dataset(self) -> bool:
         if not self.use_schema_per_dataset:
-            # Default: dataset_name is a table-name prefix in `public`, not a schema
-            # (FB-3446). Opt in with use_schema_per_dataset for real schemas.
+            # Default: dataset_name is a table-name prefix in `public`, not a schema.
+            # Opt in with use_schema_per_dataset for real schemas.
             return True
         return super().has_dataset()
 
@@ -168,8 +168,14 @@ class FireboltSqlClient(SqlClientBase[Connection]):
     def drop_dataset(self) -> None:
         if not self.use_schema_per_dataset:
             return None
-        # Match dlt SqlClientBase: DROP SCHEMA ... CASCADE.
-        self.execute_sql("DROP SCHEMA %s CASCADE" % self.fully_qualified_dataset_name())
+        # IF EXISTS: append-only / default-replace never creates {dataset}_staging,
+        # and dlt's drop_storage() still tries to drop it under
+        # suppress(DatabaseUndefinedRelation). Making the DDL itself idempotent
+        # avoids depending on engine error wording.
+        self.execute_sql(
+            "DROP SCHEMA IF EXISTS %s CASCADE"
+            % self.fully_qualified_dataset_name()
+        )
 
     def make_qualified_table_name_path(
         self,

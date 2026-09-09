@@ -106,7 +106,7 @@ Example for managed Firebolt (S3 mode):
 staging_mode = "s3"
 s3_location_name = "your_location_name"
 s3_prefix = "dlt-landing"
-# use_schema_per_dataset = false  # opt-in real schemas (FB-3446); default off
+# use_schema_per_dataset = false  # opt-in real schemas; default off
 
 [destination.firebolt.credentials]
 host = "YOUR_FIREBOLT_DATABASE"
@@ -138,11 +138,11 @@ With `from_secrets=True` (or a plain `destination="firebolt"` pipeline), set the
 | `FIREBOLT_S3_LOCATION_NAME` | s3 mode | Firebolt external location name |
 | `S3_BUCKET` | s3 mode | Staging bucket |
 | `S3_PREFIX` | no | Key prefix (default: `dlt-landing`) |
-| `FIREBOLT_USE_SCHEMA_PER_DATASET` | no | `true` to map `dataset_name` to a real Firebolt schema (default: off — tables stay `public.{dataset}_{table}`) |
+| `FIREBOLT_USE_SCHEMA_PER_DATASET` | no | `true` to map `dataset_name` to a real Firebolt schema (default: off — tables stay `public.{dataset}_{table}`). Read only by `make_firebolt_pipeline(from_secrets=False)`; with `from_secrets=True` / bare `firebolt()` set `use_schema_per_dataset` in TOML or `DESTINATION__FIREBOLT__USE_SCHEMA_PER_DATASET` |
 
 The destination resolves the engine URL from your account; you do not set an HTTP endpoint manually.
 
-#### Schema-per-dataset (opt-in, FB-3446)
+#### Schema-per-dataset (opt-in)
 
 **Default is off.** Existing pipelines keep writing `public.{dataset}_{table}` and store dlt state tables (`_dlt_loads`, `_dlt_pipeline_state`, `_dlt_version`) under that public-prefix naming. Enabling the flag is a **deliberate breaking change** for that layout:
 
@@ -152,21 +152,26 @@ The destination resolves the engine URL from your account; you do not set an HTT
 | Staging | `public.tenant_a_staging_*` | schema `tenant_a_staging` |
 | dlt state | `public.{dataset}__dlt_*` | `{dataset}._dlt_*` |
 
-**dlt state freshness depends on whether the dataset schema already exists** when the pipeline first runs with the flag on (`has_dataset()` checks `information_schema.schemata`):
+**Where dlt state actually lives:** the incremental cursor / load state that “fresh vs retained” refers to is primarily **local pipeline state** on the machine running dlt (under the pipeline working directory). Destination `{dataset}._dlt_*` tables are a separate store; dropping them alone does **not** reset the local cursor.
 
-- If the schema does **not** exist yet, the first run creates it and dlt state under that schema starts **fresh** (nothing is copied from `public.{dataset}__dlt_*`).
-- If you **pre-create** the schema (for example `CREATE SCHEMA IF NOT EXISTS …` before CLONE/CTAS), `has_dataset()` is already true, so existing destination state tables in that schema are **retained** — not reset.
+**First flag-ON run — two different situations:**
 
-Do **not** set `dataset_name="public"` with the flag on. Remote wipe via `pipeline.destination_client().drop_storage()` (or `drop_dataset()`) emits `DROP SCHEMA "public" CASCADE`, which removes the shared public schema. Prefer a dedicated dataset/schema name such as `tenant_a` or `demo`.
+- **Fresh machine (no local pipeline state):** the destination schema being pre-created or not does not change local state — you still get a **fresh** local cursor. Destination `_dlt_*` tables appear only after the first successful load.
+- **Same machine with existing local state:** that local state is what continues the cursor. Pre-creating the destination schema (for CLONE/CTAS) does not by itself “retain” local state; genuine destination-state continuity across machines requires cloning/migrating `_dlt_*` as well if you rely on those tables.
+
+`has_dataset()` (schema exists in `information_schema.schemata`) only gates whether dlt runs `CREATE SCHEMA`; it is **not** the mechanism that resets or retains the local cursor.
+
+Do **not** set `dataset_name="public"` (or point staging at `public` via `staging_dataset_name_layout`) with the flag on — the connector rejects those reserved names. Prefer a dedicated dataset/schema name such as `tenant_a` or `demo`.
 
 **Replace disposition:** in schema mode, truncate/replace uses `DELETE … WHERE 1=1` (not `TRUNCATE`) on **both** Core and managed, so older Core builds that silently no-op schema-qualified `TRUNCATE` stay correct. The destination role therefore needs `DELETE` privilege, and full-table deletes create delete logs.
 
 Firebolt does **not** support `ALTER TABLE … SET SCHEMA`, and `ALTER TABLE … RENAME TO` cannot rename across schemas. To bring **existing data** from the old public-prefix layout into the new schema, Firebolt’s recommended path is a **zero-copy** [`CREATE TABLE … CLONE`](https://docs.firebolt.io/reference-sql/commands/data-definition/create-table-clone) (metadata-level; near-instant; no extra storage), then drop the old table:
 
 ```sql
--- Pre-creating the schema retains destination state if state tables already
--- exist there; omit this and let the pipeline create the schema if you want
--- fresh dlt state on first flag-ON run.
+-- CLONE requires the target schema to exist first. Pre-creating it does not
+-- reset or retain local dlt state by itself (see state notes above). On a fresh
+-- machine you still start with a fresh local cursor; clone destination _dlt_*
+-- only if you need those tables elsewhere.
 CREATE SCHEMA IF NOT EXISTS tenant_a;
 CREATE TABLE tenant_a.orders CLONE public.tenant_a_orders;
 -- verify row counts / spot-check, then:
@@ -180,7 +185,7 @@ CREATE TABLE tenant_a.orders AS SELECT * FROM public.tenant_a_orders;
 DROP TABLE public.tenant_a_orders;
 ```
 
-If you migrate only data tables and want a clean incremental cursor, drop any `{dataset}._dlt_*` state tables in the new schema (or avoid pre-creating the schema) before the first flag-ON run.
+To start with a **fresh local incremental cursor**, clear or omit the local pipeline working directory (or run a new `pipeline_name`) before the first flag-ON run. Dropping only `{dataset}._dlt_*` in the destination is **not** equivalent.
 
 ### Firebolt Core
 

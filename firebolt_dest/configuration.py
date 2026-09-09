@@ -81,7 +81,7 @@ class FireboltClientConfiguration(DestinationClientDwhWithStagingConfiguration):
     use_schema_per_dataset: bool = False
     """When True, map dataset_name to a real Firebolt schema (schema.table).
     Default False keeps today's behavior: tables as public.{dataset}_{table}.
-    See FB-3446. Breaking if enabled against an existing public-prefix layout."""
+    Breaking if enabled against an existing public-prefix layout."""
 
     def fingerprint(self) -> str:
         if self.credentials and self.credentials.database:
@@ -130,10 +130,14 @@ def s3_prefix_from_env() -> str:
 
 
 def use_schema_per_dataset_from_env() -> bool:
-    return os.environ.get("FIREBOLT_USE_SCHEMA_PER_DATASET", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
+    raw = os.environ.get("FIREBOLT_USE_SCHEMA_PER_DATASET", "").strip().lower()
+    if raw in ("", "0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    raise RuntimeError(
+        f"Invalid FIREBOLT_USE_SCHEMA_PER_DATASET={raw!r}. "
+        "Expected true/false (or 1/0, yes/no, on/off)."
     )
 
 
