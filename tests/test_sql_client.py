@@ -118,6 +118,14 @@ def test_make_qualified_table_name_path_flag_on_schema_qualified() -> None:
     # Must not touch public when the flag is on.
     for part in client.make_qualified_table_name_path("orders"):
         assert part.strip('"') != "public"
+    # dlt 1.30+ passes dataset_name/catalog; must not TypeError (and default
+    # call output above stays unchanged).
+    assert client.make_qualified_table_name_path(
+        "orders", dataset_name="other"
+    ) == ['"other"', '"orders"']
+    assert client.make_qualified_table_name_path(
+        "orders", dataset_name="other", catalog="cat"
+    ) == ['"cat"', '"other"', '"orders"']
 
 
 def test_make_qualified_schema_and_table_are_quoted() -> None:

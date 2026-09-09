@@ -94,10 +94,10 @@ def test_replace_insert_from_staging_sql_schema_per_dataset() -> None:
     sql = SqlStagingReplaceFollowupJob.generate_sql([table], client)
     joined = "\n".join(sql)
 
-    # Schema mode must not emit TRUNCATE / bare DELETE (Core silent no-ops).
+    # Schema mode must not emit TRUNCATE (Core silent no-op on schema-qualified
+    # tables on older builds); replace uses DELETE ... WHERE 1=1 instead.
     assert 'DELETE FROM "demo"."items" WHERE 1=1' in joined
     assert "TRUNCATE" not in joined.upper()
-    assert 'DELETE FROM "demo"."items";' not in joined.replace(" WHERE 1=1", "")
     assert 'INSERT INTO "demo"."items"' in joined
     assert 'FROM "demo_staging"."items"' in joined
     assert "public" not in joined

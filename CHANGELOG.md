@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Added: opt-in `use_schema_per_dataset` / `FIREBOLT_USE_SCHEMA_PER_DATASET`
+  (FB-3446). When enabled, `dataset_name` maps to a real Firebolt schema
+  (`tenant_a.orders`) instead of the default `public.{dataset}_{table}`
+  layout. Staging uses `{dataset}_staging`, and dlt state tables live under
+  the dataset schema. Default remains **off** so existing pipelines are
+  unchanged.
+- Migration: enabling the flag is a deliberate layout break. Pre-create the
+  target schema (or CLONE/CTAS data into it) only if you intend to **retain**
+  existing dlt state; otherwise let the first run create the schema so state
+  starts fresh. Do **not** use `dataset_name="public"` with the flag on —
+  `pipeline.destination_client().drop_storage()` / `drop_dataset()` emits
+  `DROP SCHEMA "public" CASCADE`.
+- Note: schema-mode `replace` uses `DELETE … WHERE 1=1` (not `TRUNCATE`) on
+  both Core and managed for older-Core compatibility; the destination role
+  needs `DELETE` privilege and full-table deletes create delete logs.
+
 ## 0.3.1
 
 - Fixed: `TypeError: not all arguments converted during string formatting` on

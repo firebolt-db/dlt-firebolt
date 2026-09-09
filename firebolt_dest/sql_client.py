@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from typing import Any, AnyStr, ClassVar, Iterator, List, Optional, Sequence, Tuple
 
@@ -171,27 +172,62 @@ class FireboltSqlClient(SqlClientBase[Connection]):
         self.execute_sql("DROP SCHEMA %s CASCADE" % self.fully_qualified_dataset_name())
 
     def make_qualified_table_name_path(
-        self, table_name: Optional[str], quote: bool = True, casefold: bool = True
+        self,
+        table_name: Optional[str],
+        quote: bool = True,
+        casefold: bool = True,
+        dataset_name: Optional[str] = None,
+        catalog: Optional[str] = None,
     ) -> List[str]:
         if self.use_schema_per_dataset:
             # Real Firebolt schema: path is [schema] or [schema, table].
-            schema = self.dataset_name
-            if casefold:
-                schema = self.capabilities.casefold_identifier(schema)
-            if quote:
-                schema = self.capabilities.escape_identifier(schema)
-            path = [schema]
-            if table_name is None:
+            # catalog_name() is None, so SqlClientBase output is byte-identical to
+            # the previous hand-rolled branch. Accept dataset_name/catalog so dlt
+            # 1.30+ callers do not TypeError; forward only when base supports them.
+            base_params = inspect.signature(
+                SqlClientBase.make_qualified_table_name_path
+            ).parameters
+            if "dataset_name" in base_params:
+                return super().make_qualified_table_name_path(
+                    table_name,
+                    quote=quote,
+                    casefold=casefold,
+                    dataset_name=dataset_name,
+                    catalog=catalog,
+                )
+            # dlt < 1.30: emulate the 1.30 override path so kwargs never TypeError.
+            if catalog is not None or dataset_name is not None:
+                path: List[str] = []
+                if catalog is not None:
+                    cat = catalog
+                    if casefold:
+                        cat = self.capabilities.casefold_identifier(cat)
+                    if quote:
+                        cat = self.capabilities.escape_identifier(cat)
+                    path.append(cat)
+                effective = (
+                    dataset_name if dataset_name is not None else self.dataset_name
+                )
+                if casefold:
+                    effective = self.capabilities.casefold_identifier(effective)
+                if quote:
+                    effective = self.capabilities.escape_identifier(effective)
+                path.append(effective)
+                if table_name:
+                    name = table_name
+                    if casefold:
+                        name = self.capabilities.casefold_identifier(name)
+                    if quote:
+                        name = self.capabilities.escape_identifier(name)
+                    path.append(name)
                 return path
-            name = table_name
-            if casefold:
-                name = self.capabilities.casefold_identifier(name)
-            if quote:
-                name = self.capabilities.escape_identifier(name)
-            path.append(name)
-            return path
+            return super().make_qualified_table_name_path(
+                table_name, quote=quote, casefold=casefold
+            )
 
         # Default (flag off): flatten dataset into a public table-name prefix.
+        # dataset_name/catalog are accepted for signature parity but ignored —
+        # changing this layout would break byte-identity with main.
         if table_name is None:
             return ["public"]
         name = f"{self.dataset_name}_{table_name}" if self.dataset_name else table_name

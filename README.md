@@ -121,6 +121,8 @@ bucket_url = "s3://your-bucket/dlt-landing/dlt/staging"
 
 See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
 
+With `from_secrets=True` (or a plain `destination="firebolt"` pipeline), set the flag in TOML as `use_schema_per_dataset = true` under `[destination.firebolt]`, or via the dlt env alias `DESTINATION__FIREBOLT__USE_SCHEMA_PER_DATASET=true`. `FIREBOLT_USE_SCHEMA_PER_DATASET` is read only when `make_firebolt_pipeline(..., from_secrets=False)` builds the destination from env.
+
 ## Configuration
 
 ### Managed Firebolt
@@ -150,11 +152,21 @@ The destination resolves the engine URL from your account; you do not set an HTT
 | Staging | `public.tenant_a_staging_*` | schema `tenant_a_staging` |
 | dlt state | `public.{dataset}__dlt_*` | `{dataset}._dlt_*` |
 
-Turning the flag **ON** gives the pipeline **fresh dlt state** under the new dataset schema (state tables are not carried over from `public`). Plan a cutover if you need history.
+**dlt state freshness depends on whether the dataset schema already exists** when the pipeline first runs with the flag on (`has_dataset()` checks `information_schema.schemata`):
+
+- If the schema does **not** exist yet, the first run creates it and dlt state under that schema starts **fresh** (nothing is copied from `public.{dataset}__dlt_*`).
+- If you **pre-create** the schema (for example `CREATE SCHEMA IF NOT EXISTS …` before CLONE/CTAS), `has_dataset()` is already true, so existing destination state tables in that schema are **retained** — not reset.
+
+Do **not** set `dataset_name="public"` with the flag on. Remote wipe via `pipeline.destination_client().drop_storage()` (or `drop_dataset()`) emits `DROP SCHEMA "public" CASCADE`, which removes the shared public schema. Prefer a dedicated dataset/schema name such as `tenant_a` or `demo`.
+
+**Replace disposition:** in schema mode, truncate/replace uses `DELETE … WHERE 1=1` (not `TRUNCATE`) on **both** Core and managed, so older Core builds that silently no-op schema-qualified `TRUNCATE` stay correct. The destination role therefore needs `DELETE` privilege, and full-table deletes create delete logs.
 
 Firebolt does **not** support `ALTER TABLE … SET SCHEMA`, and `ALTER TABLE … RENAME TO` cannot rename across schemas. To bring **existing data** from the old public-prefix layout into the new schema, Firebolt’s recommended path is a **zero-copy** [`CREATE TABLE … CLONE`](https://docs.firebolt.io/reference-sql/commands/data-definition/create-table-clone) (metadata-level; near-instant; no extra storage), then drop the old table:
 
 ```sql
+-- Pre-creating the schema retains destination state if state tables already
+-- exist there; omit this and let the pipeline create the schema if you want
+-- fresh dlt state on first flag-ON run.
 CREATE SCHEMA IF NOT EXISTS tenant_a;
 CREATE TABLE tenant_a.orders CLONE public.tenant_a_orders;
 -- verify row counts / spot-check, then:
@@ -168,7 +180,7 @@ CREATE TABLE tenant_a.orders AS SELECT * FROM public.tenant_a_orders;
 DROP TABLE public.tenant_a_orders;
 ```
 
-State tables are usually not worth migrating: enable the flag and accept a fresh incremental cursor under the new schema.
+If you migrate only data tables and want a clean incremental cursor, drop any `{dataset}._dlt_*` state tables in the new schema (or avoid pre-creating the schema) before the first flag-ON run.
 
 ### Firebolt Core
 
