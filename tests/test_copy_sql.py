@@ -1,4 +1,4 @@
-"""Tests for firebolt_dest (no Firebolt connection required)."""
+"""Tests for firebolt_dest COPY PATTERN helpers (no Firebolt connection required)."""
 
 from urllib.parse import urlparse
 
@@ -11,8 +11,8 @@ from firebolt_dest.copy_sql import (
 )
 
 
-def _original_s3_url_to_copy_pattern(file_url: str, s3_prefix: str) -> str:
-    """Pre-CHANGE-2 behavior (strip s3_prefix / basename fallback)."""
+def _legacy_prefix_relative_pattern(file_url: str, s3_prefix: str) -> str:
+    """Historic classic behavior: strip matching s3_prefix; else basename fallback."""
     path = urlparse(file_url).path.lstrip("/")
     prefix = s3_prefix.strip("/") + "/"
     if path.startswith(prefix):
@@ -27,7 +27,7 @@ def test_s3_url_to_copy_pattern_classic_matches_original() -> None:
     for location_url in ("dlt-landing", "s3://my-bucket/dlt-landing/"):
         got = s3_url_to_copy_pattern(url, location_url)
         assert got == "dlt/staging/hubspot/file.parquet"
-        assert got == _original_s3_url_to_copy_pattern(url, "dlt-landing")
+        assert got == _legacy_prefix_relative_pattern(url, "dlt-landing")
 
 
 def test_s3_url_to_copy_pattern_bucket_root_keeps_tenant() -> None:
@@ -63,6 +63,13 @@ def test_s3_url_to_copy_pattern_bucket_root_no_prefix() -> None:
     assert s3_url_to_copy_pattern(url, "") == "foo.parquet"
 
 
+def test_s3_url_to_copy_pattern_double_slash_key_preserved() -> None:
+    """Opaque-key parse strips exactly one leading '/'; doubled slashes stay in the key."""
+    url = "s3://example-bucket//tenant-a/file.parquet"
+    assert s3_url_to_copy_pattern(url, "s3://example-bucket/") == "/tenant-a/file.parquet"
+    assert s3_url_to_copy_pattern(url, "") == "/tenant-a/file.parquet"
+
+
 def test_s3_url_to_copy_pattern_not_under_location_raises() -> None:
     url = "s3://my-bucket/tenant-a/dlt/staging/file.parquet"
     with pytest.raises(TerminalValueError, match="not under the LOCATION URL path"):
@@ -83,15 +90,37 @@ def test_s3_url_to_copy_pattern_wrong_bucket_raises() -> None:
         s3_url_to_copy_pattern(url, "s3://other-bucket/")
 
 
-def test_s3_url_to_copy_pattern_rejects_glob_metacharacters() -> None:
-    """Glob metacharacters in the resolved PATTERN are a tenant-isolation hazard."""
-    url = "s3://example-bucket/tenant-*/dlt/staging/file.parquet"
-    with pytest.raises(TerminalValueError, match="glob metacharacters"):
-        s3_url_to_copy_pattern(url, "s3://example-bucket/")
-    # '[' is also rejected (urlparse treats '?' as query delimiter, so test '[').
-    url_bracket = "s3://example-bucket/tenant-[ab]/dlt/staging/file.parquet"
-    with pytest.raises(TerminalValueError, match=r"\["):
-        s3_url_to_copy_pattern(url_bracket, "s3://example-bucket/")
+def test_s3_url_to_copy_pattern_wrong_scheme_raises() -> None:
+    url = "s3://example-bucket/tenant-a/dlt/staging/file.parquet"
+    with pytest.raises(TerminalValueError, match="scheme"):
+        s3_url_to_copy_pattern(url, "gs://example-bucket/")
+
+
+def test_s3_url_to_copy_pattern_degenerate_location_url_raises() -> None:
+    """Non-empty LOCATION URLs with no bucket must not skip the cross-bucket guard."""
+    url = "s3://example-bucket/tenant-a/dlt/staging/file.parquet"
+    for bad in ("s3://", "s3:///", "https://"):
+        with pytest.raises(TerminalValueError, match="missing bucket"):
+            s3_url_to_copy_pattern(url, bad)
+    # Unset location_url still falls back (bucket-root / full key).
+    assert s3_url_to_copy_pattern(url, "") == "tenant-a/dlt/staging/file.parquet"
+
+
+def test_s3_url_to_copy_pattern_rejects_glob_and_fragment_chars() -> None:
+    """Opaque keys keep ?/#; those and glob metacharacters must raise (no silent truncate)."""
+    root = "s3://example-bucket/"
+    cases = [
+        ("s3://example-bucket/tenant-*/dlt/staging/file.parquet", r"\*"),
+        ("s3://example-bucket/tenant-?/dlt/staging/file.parquet", r"\?"),
+        ("s3://example-bucket/tenant-[ab]/dlt/staging/file.parquet", r"\["),
+        ("s3://example-bucket/tenant-a/rev#2.parquet", "#"),
+    ]
+    for url, match in cases:
+        with pytest.raises(TerminalValueError, match=match):
+            s3_url_to_copy_pattern(url, root)
+        # Also a ValueError subclass.
+        with pytest.raises(ValueError, match="forbidden characters"):
+            s3_url_to_copy_pattern(url, root)
 
 
 def test_gen_firebolt_copy_sql_escapes_apostrophe_in_pattern() -> None:

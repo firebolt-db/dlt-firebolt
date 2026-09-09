@@ -141,6 +141,7 @@ class firebolt(Destination[FireboltClientConfiguration, "FireboltClient"]):
     def __init__(
         self,
         credentials: Union[FireboltCredentials, Dict[str, Any], str] = None,
+        *,
         s3_location_name: str = "firebolt_s3",
         s3_location_url: str = "",
         s3_prefix: str = "dlt-landing",

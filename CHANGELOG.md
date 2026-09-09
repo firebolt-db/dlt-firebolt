@@ -8,9 +8,15 @@
   can serve per-tenant staging prefixes. Classic prefix-LOCATION setups that
   omit `s3_location_url` keep the previous `s3_prefix`-as-LOCATION-path
   fallback.
-- Fixed: LOCATION/object bucket mismatch, path mismatch, and glob
-  metacharacters in the resolved PATTERN now raise `TerminalValueError`
-  (terminal — not retried by dlt). Apostrophes in PATTERN are SQL-escaped.
+- Fixed: LOCATION/object bucket or scheme mismatch, path mismatch, and
+  PATTERN characters `* ? [ #` now raise `TerminalValueError` (terminal —
+  not retried by dlt). Object keys are parsed as opaque URL suffixes so
+  `?`/`#` are not silently truncated. Degenerate LOCATION URLs without a
+  bucket (`s3://`, `s3:///`) are rejected. Apostrophes in PATTERN are
+  SQL-escaped.
+- Changed: `firebolt()` destination factory parameters after `credentials`
+  are keyword-only (avoids silent positional rebinding when
+  `s3_location_url` was inserted).
 - Docs: clarified which env vars apply to `from_secrets=False` vs TOML /
   `DESTINATION__FIREBOLT__*`; noted that a bucket-root LOCATION is not an
   authorization boundary across prefixes.

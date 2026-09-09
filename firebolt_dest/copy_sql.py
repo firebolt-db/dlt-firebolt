@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlparse
 
 from dlt.common.exceptions import TerminalValueError
 
@@ -9,41 +8,68 @@ from dlt.common.exceptions import TerminalValueError
 # (plain __name__ loggers are silent when dlt's logger has propagate=False).
 logger = logging.getLogger("dlt.firebolt_dest")
 
-# Glob metacharacters that would turn PATTERN into a wildcard match across
-# tenant prefixes if allowed into the COPY PATTERN string.
+# Characters that must not appear in a resolved COPY PATTERN:
+# - * ? [  — Firebolt/glob wildcards (tenant-isolation hazard)
+# - #      — URL fragment delimiter; must stay literal key bytes, but we reject
+#            it so a fragment-like suffix cannot be confused with a key segment
 _GLOB_METACHARS = frozenset("*?[")
+_PATTERN_FORBIDDEN = _GLOB_METACHARS | frozenset("#")
+
+
+def _split_opaque_url(url: str) -> tuple[str | None, str | None, str]:
+    """Split ``scheme://netloc/key`` by string ops; keep the key opaque.
+
+    Unlike ``urllib.parse.urlparse``, this does **not** treat ``?`` / ``#`` as
+    query/fragment delimiters — those bytes stay in the key (legal in S3).
+    Exactly one leading ``/`` is stripped from the key portion when present;
+    further leading slashes (double-slash keys) are preserved.
+    """
+    raw = url or ""
+    if "://" not in raw:
+        key = raw[1:] if raw.startswith("/") else raw
+        return None, None, key
+    scheme, rest = raw.split("://", 1)
+    slash = rest.find("/")
+    if slash < 0:
+        return scheme or None, rest or None, ""
+    netloc = rest[:slash]
+    key_raw = rest[slash:]  # includes the leading '/'
+    key = key_raw[1:] if key_raw.startswith("/") else key_raw
+    return scheme or None, netloc or None, key
 
 
 def _location_path_prefix(location_url: str) -> str:
     """Return the LOCATION URL path as an object-key prefix ('' = bucket root).
 
     ``location_url`` may be a full S3 URL (``s3://bucket/prefix/``) or a bare
-    path/prefix (``prefix`` / ``prefix/``). Trailing slash is normalized on.
+    path/prefix (``prefix`` / ``prefix/``). A single trailing slash is
+    normalized on when the path is non-empty. Does not strip interior or
+    doubled slashes from the key.
     """
     raw = (location_url or "").strip()
-    if not raw or raw in ("/", "s3://", "s3:///"):
+    if not raw:
         return ""
-    if "://" in raw:
-        path = urlparse(raw).path.lstrip("/")
-    else:
-        path = raw.lstrip("/")
-    path = path.strip("/")
-    if not path:
+    _, netloc, key = _split_opaque_url(raw)
+    if "://" in raw and not netloc:
+        # Degenerate URLs (s3://, s3:///) are rejected by the caller; treat as
+        # empty path if somehow reached.
         return ""
-    return path + "/"
+    if not key:
+        return ""
+    return key if key.endswith("/") else key + "/"
 
 
-def _location_bucket(location_url: str) -> str | None:
-    """Return the LOCATION bucket (netloc) when ``location_url`` is a full URL.
+def _location_authority(location_url: str) -> tuple[str | None, str | None]:
+    """Return ``(scheme, netloc)`` for a full LOCATION URL, else ``(None, None)``.
 
-    Bare path / ``s3_prefix`` fallbacks have no netloc — return None so callers
-    skip the cross-bucket check.
+    Bare ``s3_prefix`` fallbacks have neither — callers skip the cross-bucket
+    check. A non-empty URL with ``://`` but no netloc is invalid (see caller).
     """
     raw = (location_url or "").strip()
     if "://" not in raw:
-        return None
-    netloc = urlparse(raw).netloc
-    return netloc or None
+        return None, None
+    scheme, netloc, _ = _split_opaque_url(raw)
+    return scheme, netloc
 
 
 def _mismatch_message(location_url: str, *, detail: str) -> str:
@@ -78,20 +104,44 @@ def s3_url_to_copy_pattern(file_url: str, location_url: str = "") -> str:
     - LOCATION ``s3://example-bucket/tenant-a/`` + key ``tenant-a/dlt/staging/foo.parquet``
       → ``dlt/staging/foo.parquet`` (classic single-tenant)
     - LOCATION ``s3://example-bucket/`` + key ``foo.parquet`` → ``foo.parquet``
-    - key not under LOCATION path, or object bucket ≠ LOCATION bucket → raises
-      ``TerminalValueError`` (never basename)
+    - key not under LOCATION path, object bucket/scheme ≠ LOCATION, or PATTERN
+      contains ``* ? [ #`` → raises ``TerminalValueError`` (never basename /
+      silent truncation)
     """
-    parsed_file = urlparse(file_url)
-    key = parsed_file.path.lstrip("/")
-    loc_bucket = _location_bucket(location_url)
+    loc_raw = (location_url or "").strip()
+    # Non-empty LOCATION URL that carries a scheme but no bucket is never valid
+    # (s3://, s3:///). Reject up front so the cross-bucket guard cannot be
+    # silently skipped. Empty loc_raw is the unset → s3_prefix fallback case.
+    if loc_raw and "://" in loc_raw:
+        loc_scheme, loc_bucket = _location_authority(loc_raw)
+        if not loc_bucket:
+            raise TerminalValueError(
+                "Firebolt COPY PATTERN: s3_location_url / FIREBOLT_S3_LOCATION_URL "
+                f"is not a valid LOCATION URL (missing bucket): {location_url!r}. "
+                "Expected s3://bucket/ or s3://bucket/prefix/."
+            )
+    else:
+        loc_scheme, loc_bucket = None, None
+
+    file_scheme, file_bucket, key = _split_opaque_url(file_url)
+
     if loc_bucket is not None:
-        file_bucket = parsed_file.netloc
         if file_bucket and file_bucket != loc_bucket:
             raise TerminalValueError(
                 "Firebolt COPY PATTERN: object bucket does not match LOCATION URL "
                 f"bucket. LOCATION URL={location_url!r} (bucket={loc_bucket!r}), "
                 f"object URL={file_url!r} (bucket={file_bucket!r}). "
                 "Refusing to emit a PATTERN that could resolve against the wrong bucket."
+            )
+        if (
+            loc_scheme
+            and file_scheme
+            and loc_scheme.casefold() != file_scheme.casefold()
+        ):
+            raise TerminalValueError(
+                "Firebolt COPY PATTERN: object URL scheme does not match LOCATION "
+                f"URL scheme. LOCATION URL={location_url!r} (scheme={loc_scheme!r}), "
+                f"object URL={file_url!r} (scheme={file_scheme!r})."
             )
 
     loc_path = _location_path_prefix(location_url)
@@ -105,16 +155,17 @@ def s3_url_to_copy_pattern(file_url: str, location_url: str = "") -> str:
         )
 
     pattern = key[len(loc_path) :] if loc_path else key
-    # Reject glob metacharacters in the resolved PATTERN. Silently escaping
-    # would still leave an ambiguous intent; a wildcard matching a sibling
-    # tenant prefix is a data-isolation bug.
-    bad = sorted({ch for ch in pattern if ch in _GLOB_METACHARS})
+    # Reject glob / fragment metacharacters in the resolved PATTERN. Silently
+    # escaping would still leave an ambiguous intent; a wildcard matching a
+    # sibling tenant prefix is a data-isolation bug. Opaque-key parsing ensures
+    # '?' and '#' reach this guard instead of being truncated by urlparse.
+    bad = sorted({ch for ch in pattern if ch in _PATTERN_FORBIDDEN})
     if bad:
         raise TerminalValueError(
-            "Firebolt COPY PATTERN: resolved PATTERN contains glob metacharacters "
-            f"{bad} (from the object key / staging prefix). Refusing to emit a "
-            f"wildcard PATTERN that could match another tenant's objects. "
-            f"pattern={pattern!r}."
+            "Firebolt COPY PATTERN: resolved PATTERN contains forbidden characters "
+            f"{bad} (glob metacharacters * ? [ or '#'). Refusing to emit a "
+            f"wildcard / truncated PATTERN that could match another tenant's "
+            f"objects. pattern={pattern!r}."
         )
 
     logger.debug(
@@ -143,7 +194,7 @@ def gen_firebolt_copy_sql(
         raise TerminalValueError(
             f"Firebolt prototype only supports parquet, got {file_format!r}"
         )
-    # PATTERN was already checked for glob metacharacters in s3_url_to_copy_pattern;
+    # PATTERN was already checked for forbidden characters in s3_url_to_copy_pattern;
     # still escape quotes so a key segment with an apostrophe cannot break the literal.
     safe_pattern = _escape_sql_string_literal(pattern)
     return f"""COPY INTO {qualified_table_name}

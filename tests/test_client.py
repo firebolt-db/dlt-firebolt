@@ -44,24 +44,29 @@ def _make_copy_job(
 
 
 def test_copy_job_prefers_s3_location_url_over_s3_prefix() -> None:
+    """run() must emit a tenant-prefixed PATTERN when s3_location_url is bucket-root."""
     job = _make_copy_job(
         bucket_path="s3://example-bucket/tenant-a/dlt/staging/orders.abc123.0.parquet",
         s3_prefix="tenant-a",
         s3_location_url="s3://example-bucket/",
     )
-    location_url = job._s3_location_url or job._s3_prefix
-    assert location_url == "s3://example-bucket/"
-    assert job._s3_prefix == "tenant-a"
+    job.run()
+    copy_sql = job._sql_client.execute_sql.call_args[0][0]
+    assert "PATTERN = 'tenant-a/dlt/staging/orders.abc123.0.parquet'" in copy_sql
+    assert "FROM firebolt_s3" in copy_sql
 
 
 def test_copy_job_falls_back_to_s3_prefix_when_location_url_empty() -> None:
+    """run() must strip s3_prefix when s3_location_url is unset (classic single-tenant)."""
     job = _make_copy_job(
         bucket_path="s3://example-bucket/dlt-landing/dlt/staging/orders.abc123.0.parquet",
         s3_prefix="dlt-landing",
         s3_location_url="",
     )
-    location_url = job._s3_location_url or job._s3_prefix
-    assert location_url == "dlt-landing"
+    job.run()
+    copy_sql = job._sql_client.execute_sql.call_args[0][0]
+    assert "PATTERN = 'dlt/staging/orders.abc123.0.parquet'" in copy_sql
+    assert "tenant-a" not in copy_sql
 
 
 def test_copy_load_job_wrong_bucket_is_terminal() -> None:
@@ -82,7 +87,7 @@ def test_copy_load_job_glob_prefix_is_terminal() -> None:
         s3_prefix="tenant-*",
         s3_location_url="s3://example-bucket/",
     )
-    with pytest.raises(TerminalValueError, match="glob metacharacters"):
+    with pytest.raises(TerminalValueError, match="forbidden characters|glob"):
         job.run()
     job._sql_client.execute_sql.assert_not_called()
 
@@ -114,3 +119,20 @@ def test_create_load_job_wires_s3_location_url_from_config() -> None:
     assert isinstance(job, FireboltCopyLoadJob)
     assert job._s3_location_url == "s3://example-bucket/"
     assert job._s3_prefix == "tenant-b"
+
+
+def test_firebolt_factory_rejects_positional_after_credentials() -> None:
+    """Inserting s3_location_url must not silently rebind classic positional args."""
+    creds = FireboltCredentials()
+    creds.database = "firebolt"
+    with pytest.raises(TypeError):
+        firebolt_destination(creds, "firebolt_s3", "dlt-landing", "s3")  # type: ignore[misc]
+    # Keyword form (what make_firebolt_pipeline uses) still works.
+    dest = firebolt_destination(
+        credentials=creds,
+        s3_location_name="firebolt_s3",
+        s3_prefix="dlt-landing",
+        staging_mode="s3",
+        s3_location_url="s3://example-bucket/",
+    )
+    assert dest is not None
