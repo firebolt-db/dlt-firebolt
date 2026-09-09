@@ -135,7 +135,8 @@ class FireboltSqlClient(SqlClientBase[Connection]):
         return (None, "public", folded)
 
     def has_dataset(self) -> bool:
-        # Firebolt has no separate schema object for dlt datasets.
+        # Firebolt supports real schemas, but this connector maps dataset_name to a
+        # table-name prefix in `public` (not to a Firebolt schema).
         return True
 
     def create_dataset(self) -> None:

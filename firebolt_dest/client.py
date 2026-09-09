@@ -21,7 +21,10 @@ from dlt.destinations.path_utils import get_file_format_and_compression
 from dlt.destinations.sql_client import SqlClientBase
 
 from firebolt_dest.configuration import FireboltClientConfiguration
-from firebolt_dest.copy_sql import gen_firebolt_copy_sql, s3_url_to_copy_pattern
+from firebolt_dest.copy_sql import (
+    gen_firebolt_copy_sql,
+    s3_url_to_copy_pattern,
+)
 from firebolt_dest.sql_client import FireboltSqlClient
 from firebolt_dest.upload_client import (
     gen_upload_insert_sql,
@@ -40,19 +43,27 @@ class FireboltCopyLoadJob(CopyRemoteFileLoadJob):
         *,
         location_name: str,
         s3_prefix: str,
+        s3_location_url: str = "",
     ) -> None:
         super().__init__(file_path, staging_credentials)
         self._location_name = location_name
         self._s3_prefix = s3_prefix
+        self._s3_location_url = s3_location_url
         self._job_client: FireboltClient = None
 
     def run(self) -> None:
         self._sql_client = self._job_client.sql_client
         file_name = self._bucket_path.rsplit("/", 1)[-1]
         file_format, _ = get_file_format_and_compression(file_name)
-        pattern = s3_url_to_copy_pattern(self._bucket_path, self._s3_prefix)
+        table_name = self._sql_client.make_qualified_table_name(self.load_table_name)
+        # PATTERN is relative to the LOCATION URL path. When s3_location_url is
+        # unset, fall back to s3_prefix as the LOCATION path (classic single-tenant
+        # where LOCATION URL = s3://bucket/{s3_prefix}/). Multi-tenant bucket-root
+        # LOCATION must set s3_location_url=s3://bucket/ explicitly.
+        location_url = self._s3_location_url or self._s3_prefix
+        pattern = s3_url_to_copy_pattern(self._bucket_path, location_url)
         copy_sql = gen_firebolt_copy_sql(
-            self._sql_client.make_qualified_table_name(self.load_table_name),
+            table_name,
             location_name=self._location_name,
             pattern=pattern,
             file_format=file_format,
@@ -205,6 +216,7 @@ class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
                     ),
                     location_name=self.config.s3_location_name,
                     s3_prefix=self.config.s3_prefix,
+                    s3_location_url=self.config.s3_location_url or "",
                 )
         return job
 

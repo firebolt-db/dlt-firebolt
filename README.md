@@ -50,7 +50,9 @@ CREATE LOCATION "your_location_name" WITH
   CREDENTIALS = (AWS_ROLE_ARN = 'arn:aws:iam::...:role/...');
 ```
 
-Set `FIREBOLT_S3_LOCATION_NAME` (or `s3_location_name` in secrets) to the exact location name from `CREATE LOCATION`. Set `FIREBOLT_STAGING_MODE=s3`.
+Set `FIREBOLT_S3_LOCATION_NAME` to the exact location name. Set `S3_PREFIX` to the same key prefix as the LOCATION URL path for classic single-tenant setups (COPY `PATTERN` is relative to the LOCATION path). Set `FIREBOLT_STAGING_MODE=s3`.
+
+**Multi-tenant (one LOCATION for all tenants):** create the LOCATION at the **bucket root** (`URL = 's3://your-bucket/'`), set `FIREBOLT_S3_LOCATION_URL=s3://your-bucket/` (or `s3_location_url` in TOML — see below), and set a per-tenant staging prefix so objects land under `s3://bucket/<tenant>/...`. With `make_firebolt_pipeline(from_secrets=False)`, that prefix is `S3_PREFIX=tenant-a`. With `from_secrets=True` / a bare `firebolt()` destination, steer staging with a tenant-specific `[destination.filesystem] bucket_url` instead — `S3_PREFIX` is **not** read on that path. COPY `PATTERN` keeps the tenant segment (e.g. `tenant-a/dlt/staging/...`). Existing prefix-LOCATION setups that omit `FIREBOLT_S3_LOCATION_URL` keep working unchanged (LOCATION path falls back to `s3_prefix`). A LOCATION at the bucket root grants its credentials read access to **every** prefix in the bucket; `PATTERN` is not an authorization boundary. Bucket-root suits multiple prefixes inside a single trust boundary — for real tenant isolation use per-tenant LOCATIONs or buckets.
 
 The machine running dlt needs AWS credentials that can write to the staging bucket (via environment variables, an AWS profile, or an attached IAM role). Firebolt reads the staged files from the external location you configured, not the runner's AWS identity. Staging Parquet is not automatically deleted after `COPY INTO`, so add an S3 lifecycle rule or a periodic cleanup if you don't want objects to accumulate.
 
@@ -106,6 +108,11 @@ Example for managed Firebolt (S3 mode):
 staging_mode = "s3"
 s3_location_name = "your_location_name"
 s3_prefix = "dlt-landing"
+# Multi-tenant bucket-root LOCATION (PATTERN relative to this URL):
+# s3_location_url = "s3://example-bucket/"
+# Steer staging with a tenant-specific filesystem bucket_url (S3_PREFIX env is
+# NOT read when from_secrets=True / destination="firebolt"):
+# (see bucket_url below — e.g. s3://example-bucket/tenant-a/dlt/staging)
 
 [destination.firebolt.credentials]
 host = "YOUR_FIREBOLT_DATABASE"
@@ -115,10 +122,19 @@ password = "YOUR_CLIENT_SECRET"
 account_name = "YOUR_ACCOUNT_NAME"
 
 [destination.filesystem]
-bucket_url = "s3://your-bucket/dlt-landing/dlt/staging"
+bucket_url = "s3://example-bucket/dlt-landing/dlt/staging"
+# Multi-tenant example: bucket_url = "s3://example-bucket/tenant-a/dlt/staging"
 ```
 
-See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
+**Which config path reads which variable**
+
+| Setting | `make_firebolt_pipeline(from_secrets=False)` | `from_secrets=True` / bare `firebolt()` |
+|---------|----------------------------------------------|----------------------------------------|
+| LOCATION URL for PATTERN | `FIREBOLT_S3_LOCATION_URL` → `s3_location_url` | `s3_location_url` in `[destination.firebolt]` (or `DESTINATION__FIREBOLT__S3_LOCATION_URL`) |
+| Staging write prefix | `S3_BUCKET` + `S3_PREFIX` → filesystem `bucket_url` | `[destination.filesystem] bucket_url` only (`S3_PREFIX` is **not** read) |
+| LOCATION name | `FIREBOLT_S3_LOCATION_NAME` | `s3_location_name` |
+
+See `.dlt/secrets.toml.example` for a Firebolt Core upload template and the managed S3 fields including `s3_location_url`.
 
 ## Configuration
 
@@ -133,8 +149,9 @@ See `.dlt/secrets.toml.example` for a Firebolt Core upload template.
 | `FIREBOLT_ENGINE` | yes | Engine name |
 | `FIREBOLT_STAGING_MODE` | no | `s3` for managed production (recommended) |
 | `FIREBOLT_S3_LOCATION_NAME` | s3 mode | Firebolt external location name |
-| `S3_BUCKET` | s3 mode | Staging bucket |
-| `S3_PREFIX` | no | Key prefix (default: `dlt-landing`) |
+| `FIREBOLT_S3_LOCATION_URL` | no | LOCATION URL for PATTERN (e.g. `s3://bucket/`); empty → use `s3_prefix` as LOCATION path. Read by `make_firebolt_pipeline(from_secrets=False)`; for secrets/TOML use `s3_location_url` / `DESTINATION__FIREBOLT__S3_LOCATION_URL` |
+| `S3_BUCKET` | s3 mode | Staging bucket (`from_secrets=False` only; secrets path uses filesystem `bucket_url`) |
+| `S3_PREFIX` | no | Staging key prefix (default: `dlt-landing`); per-tenant prefix when LOCATION is at bucket root (`from_secrets=False` only) |
 
 The destination resolves the engine URL from your account; you do not set an HTTP endpoint manually.
 
