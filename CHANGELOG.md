@@ -19,6 +19,33 @@
   both Core and managed for older-Core compatibility; the destination role
   needs `DELETE` privilege and full-table deletes create delete logs.
 
+- Added: multi-tenant bucket-root LOCATION support via `s3_location_url` /
+  `FIREBOLT_S3_LOCATION_URL`. COPY `PATTERN` is relative to the LOCATION URL
+  path (not stripped against `s3_prefix`), so one LOCATION at `s3://bucket/`
+  can serve per-tenant staging prefixes. Classic prefix-LOCATION setups that
+  omit `s3_location_url` keep the previous `s3_prefix`-as-LOCATION-path
+  fallback.
+- Migration: setups that relied on the old silent basename fallback (object
+  not under the LOCATION / `s3_prefix` path) now hard-fail with
+  `TerminalValueError`. Align LOCATION URL and staging prefix; there is no
+  filename-only PATTERN fallback.
+- Fixed: LOCATION/object bucket or scheme mismatch, path mismatch, and
+  PATTERN characters `* ? [ # : \` now raise `TerminalValueError` (terminal —
+  not retried by dlt). Object keys are parsed as opaque URL suffixes so
+  `?`/`#` are not silently truncated. Degenerate LOCATION URLs without a
+  bucket (`s3://`, `s3:///`) and scheme-less `s3_location_url` values are
+  rejected at the boundary; whitespace-only `s3_location_url` cleanly falls
+  back to `s3_prefix`. Bucket-less object URLs fail closed. Apostrophes in
+  PATTERN are SQL-escaped.
+- Changed: `firebolt()` destination factory parameters after `credentials`
+  are keyword-only (avoids silent positional rebinding when
+  `s3_location_url` was inserted). **Breaking API shape** — prefer a minor
+  version bump when releasing.
+- Docs: clarified which env vars apply to `from_secrets=False` vs TOML /
+  `DESTINATION__FIREBOLT__*`; noted that a bucket-root LOCATION is not an
+  authorization boundary across prefixes.
+
+
 ## 0.3.1
 
 - Fixed: `TypeError: not all arguments converted during string formatting` on
