@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-09-18
 
 - Added: opt-in `use_schema_per_dataset` / `FIREBOLT_USE_SCHEMA_PER_DATASET`.
   When enabled, `dataset_name` maps to a real Firebolt schema

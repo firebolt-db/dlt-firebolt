@@ -2,7 +2,7 @@
 
 from firebolt_dest.factory import firebolt
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 try:
     import dlt.destinations as _destinations
