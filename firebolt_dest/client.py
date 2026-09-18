@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
-from typing import List, Optional, Sequence
+from contextvars import ContextVar
+from typing import Any, List, Optional, Sequence, Tuple
 
 from dlt.common.destination import DestinationCapabilitiesContext
 from dlt.common.destination.client import (
@@ -10,6 +10,7 @@ from dlt.common.destination.client import (
     PreparedTableSchema,
     SupportsStagingDestination,
 )
+from dlt.common.exceptions import TerminalValueError
 from dlt.common.schema import Schema, TColumnSchema
 from dlt.common.schema.typing import TColumnType
 from dlt.common.destination.client import FollowupJobRequest
@@ -30,6 +31,27 @@ from firebolt_dest.upload_client import (
     sanitize_upload_part_name,
     upload_parquet_insert,
 )
+
+# Schemas that must never be used as a dataset / staging schema when
+# use_schema_per_dataset is on (drop_storage would CASCADE-wipe them).
+_PROTECTED_SCHEMA_NAMES = frozenset({"public", "information_schema", "pg_catalog"})
+
+# Temp helper table names collected during generate_sql (avoids regex recovery).
+_pending_merge_temp_tables: ContextVar[List[str] | None] = ContextVar(
+    "firebolt_pending_merge_temp_tables", default=None
+)
+
+
+def _reject_protected_schema_name(name: str, *, kind: str) -> None:
+    if not name:
+        return
+    if name.casefold() in _PROTECTED_SCHEMA_NAMES:
+        raise TerminalValueError(
+            f"Firebolt use_schema_per_dataset refuses {kind} schema {name!r}: "
+            f"names in {_PROTECTED_SCHEMA_NAMES} are reserved. Choose a dedicated "
+            "dataset_name (and do not set staging_dataset_name_layout to a reserved "
+            "name). drop_storage() would otherwise emit DROP SCHEMA ... CASCADE on it."
+        )
 
 
 class FireboltCopyLoadJob(CopyRemoteFileLoadJob):
@@ -102,11 +124,6 @@ class FireboltMergeJob(SqlMergeFollowupJob):
     transaction (see FireboltSqlClient.begin_transaction).
     """
 
-    _CREATE_TABLE_PATTERN = re.compile(
-        r'CREATE TABLE ("[^"]+"|\S+) AS',
-        re.IGNORECASE,
-    )
-
     @classmethod
     def _new_temp_table_name(
         cls, table_name: str, op: str, sql_client: SqlClientBase
@@ -128,18 +145,71 @@ class FireboltMergeJob(SqlMergeFollowupJob):
         )
 
     @classmethod
+    def _record_temp_table(cls, temp_table_name: str) -> None:
+        pending = _pending_merge_temp_tables.get()
+        if pending is not None:
+            pending.append(temp_table_name)
+
+    @classmethod
+    def gen_delete_temp_table_sql(
+        cls,
+        table_name: str,
+        unique_column: str,
+        key_table_clauses: Sequence[str],
+        sql_client: SqlClientBase[Any],
+    ) -> Tuple[List[str], str]:
+        # Use the name returned by the generator directly (do not re-parse SQL).
+        # Schema-qualified names like "tenant a"."orders_delete_x" break a
+        # single-identifier CREATE TABLE regex and would leak helper tables.
+        sql, temp_table_name = super().gen_delete_temp_table_sql(
+            table_name, unique_column, key_table_clauses, sql_client
+        )
+        cls._record_temp_table(temp_table_name)
+        return sql, temp_table_name
+
+    @classmethod
+    def gen_insert_temp_table_sql(
+        cls,
+        table_name: str,
+        staging_root_table_name: str,
+        sql_client: SqlClientBase[Any],
+        primary_keys: Sequence[str],
+        unique_column: str,
+        dedup_sort: Tuple[str, Any] = None,
+        condition: str = None,
+        condition_columns: Sequence[str] = None,
+        skip_dedup: bool = False,
+    ) -> Tuple[List[str], str]:
+        sql, temp_table_name = super().gen_insert_temp_table_sql(
+            table_name,
+            staging_root_table_name,
+            sql_client,
+            primary_keys,
+            unique_column,
+            dedup_sort,
+            condition,
+            condition_columns,
+            skip_dedup,
+        )
+        cls._record_temp_table(temp_table_name)
+        return sql, temp_table_name
+
+    @classmethod
     def generate_sql(
         cls,
         table_chain: Sequence[PreparedTableSchema],
         sql_client: SqlClientBase,
     ) -> List[str]:
-        sql = super().generate_sql(table_chain, sql_client)
-        drops = [
-            f"DROP TABLE IF EXISTS {match.group(1)}"
-            for stmt in sql
-            if (match := cls._CREATE_TABLE_PATTERN.search(stmt))
-        ]
-        return sql + drops
+        token = _pending_merge_temp_tables.set([])
+        try:
+            sql = super().generate_sql(table_chain, sql_client)
+            drops = [
+                f"DROP TABLE IF EXISTS {name}"
+                for name in (_pending_merge_temp_tables.get() or [])
+            ]
+            return sql + drops
+        finally:
+            _pending_merge_temp_tables.reset(token)
 
 
 class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
@@ -152,11 +222,15 @@ class FireboltClient(InsertValuesJobClient, SupportsStagingDestination):
         dataset_name, staging_dataset_name = InsertValuesJobClient.create_dataset_names(
             schema, config
         )
+        if config.use_schema_per_dataset:
+            _reject_protected_schema_name(dataset_name, kind="dataset")
+            _reject_protected_schema_name(staging_dataset_name, kind="staging")
         sql_client = FireboltSqlClient(
             dataset_name,
             staging_dataset_name,
             config.credentials,
             capabilities,
+            use_schema_per_dataset=config.use_schema_per_dataset,
         )
         super().__init__(schema, config, sql_client)
         self.config: FireboltClientConfiguration = config

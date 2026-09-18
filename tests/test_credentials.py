@@ -109,3 +109,22 @@ def test_core_credentials_helper() -> None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def test_use_schema_per_dataset_from_env_rejects_typo(monkeypatch) -> None:
+    from firebolt_dest.configuration import use_schema_per_dataset_from_env
+
+    monkeypatch.setenv("FIREBOLT_USE_SCHEMA_PER_DATASET", "ture")
+    with pytest.raises(RuntimeError, match="Invalid FIREBOLT_USE_SCHEMA_PER_DATASET"):
+        use_schema_per_dataset_from_env()
+
+
+def test_use_schema_per_dataset_from_env_true_false(monkeypatch) -> None:
+    from firebolt_dest.configuration import use_schema_per_dataset_from_env
+
+    monkeypatch.delenv("FIREBOLT_USE_SCHEMA_PER_DATASET", raising=False)
+    assert use_schema_per_dataset_from_env() is False
+    monkeypatch.setenv("FIREBOLT_USE_SCHEMA_PER_DATASET", "true")
+    assert use_schema_per_dataset_from_env() is True
+    monkeypatch.setenv("FIREBOLT_USE_SCHEMA_PER_DATASET", "0")
+    assert use_schema_per_dataset_from_env() is False

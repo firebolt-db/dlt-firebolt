@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from typing import Any, AnyStr, ClassVar, Iterator, List, Optional, Sequence, Tuple
 
@@ -33,9 +34,12 @@ class FireboltSqlClient(SqlClientBase[Connection]):
         staging_dataset_name: str,
         credentials: FireboltCredentials,
         capabilities: DestinationCapabilitiesContext,
+        *,
+        use_schema_per_dataset: bool = False,
     ) -> None:
         super().__init__(credentials.database, dataset_name, staging_dataset_name, capabilities)
         self.credentials = credentials
+        self.use_schema_per_dataset = use_schema_per_dataset
         self._engine: Optional[Engine] = None
         self._conn: Optional[Connection] = None
         self._in_transaction: bool = False
@@ -125,28 +129,111 @@ class FireboltSqlClient(SqlClientBase[Connection]):
             return DatabaseTerminalException(ex)
         return DatabaseTransientException(ex)
 
+    def _truncate_table_sql(self, qualified_table_name: str) -> str:
+        if self.use_schema_per_dataset:
+            # Core 5.0.1: TRUNCATE TABLE "schema"."table" and bare DELETE FROM
+            # "schema"."table" (no predicate) are accepted but silently no-op, so
+            # replace-disposition loads accumulate rows. DELETE ... WHERE 1=1
+            # clears correctly on Core and is also safe on managed. Do not
+            # "simplify" this to TRUNCATE or bare DELETE.
+            return f"DELETE FROM {qualified_table_name} WHERE 1=1"
+        return super()._truncate_table_sql(qualified_table_name)
+
     def _get_information_schema_components(
         self, *tables: str
     ) -> Tuple[Optional[str], str, List[str]]:
+        # Schema name comes from make_qualified_table_name_path(None): "public" when
+        # use_schema_per_dataset is off; the real dataset schema when it is on.
+        schema_name = self.make_qualified_table_name_path(None, quote=False, casefold=True)[-1]
         folded = [
             self.make_qualified_table_name_path(table, quote=False, casefold=True)[-1]
             for table in tables
         ]
-        return (None, "public", folded)
+        return (None, schema_name, folded)
 
     def has_dataset(self) -> bool:
-        # Firebolt has no separate schema object for dlt datasets.
-        return True
+        if not self.use_schema_per_dataset:
+            # Default: dataset_name is a table-name prefix in `public`, not a schema.
+            # Opt in with use_schema_per_dataset for real schemas.
+            return True
+        return super().has_dataset()
 
     def create_dataset(self) -> None:
-        return None
+        if not self.use_schema_per_dataset:
+            return None
+        self.execute_sql(
+            "CREATE SCHEMA IF NOT EXISTS %s" % self.fully_qualified_dataset_name()
+        )
 
     def drop_dataset(self) -> None:
-        return None
+        if not self.use_schema_per_dataset:
+            return None
+        # IF EXISTS: append-only / default-replace never creates {dataset}_staging,
+        # and dlt's drop_storage() still tries to drop it under
+        # suppress(DatabaseUndefinedRelation). Making the DDL itself idempotent
+        # avoids depending on engine error wording.
+        self.execute_sql(
+            "DROP SCHEMA IF EXISTS %s CASCADE"
+            % self.fully_qualified_dataset_name()
+        )
 
     def make_qualified_table_name_path(
-        self, table_name: Optional[str], quote: bool = True, casefold: bool = True
+        self,
+        table_name: Optional[str],
+        quote: bool = True,
+        casefold: bool = True,
+        dataset_name: Optional[str] = None,
+        catalog: Optional[str] = None,
     ) -> List[str]:
+        if self.use_schema_per_dataset:
+            # Real Firebolt schema: path is [schema] or [schema, table].
+            # catalog_name() is None, so SqlClientBase output is byte-identical to
+            # the previous hand-rolled branch. Accept dataset_name/catalog so dlt
+            # 1.30+ callers do not TypeError; forward only when base supports them.
+            base_params = inspect.signature(
+                SqlClientBase.make_qualified_table_name_path
+            ).parameters
+            if "dataset_name" in base_params:
+                return super().make_qualified_table_name_path(
+                    table_name,
+                    quote=quote,
+                    casefold=casefold,
+                    dataset_name=dataset_name,
+                    catalog=catalog,
+                )
+            # dlt < 1.30: emulate the 1.30 override path so kwargs never TypeError.
+            if catalog is not None or dataset_name is not None:
+                path: List[str] = []
+                if catalog is not None:
+                    cat = catalog
+                    if casefold:
+                        cat = self.capabilities.casefold_identifier(cat)
+                    if quote:
+                        cat = self.capabilities.escape_identifier(cat)
+                    path.append(cat)
+                effective = (
+                    dataset_name if dataset_name is not None else self.dataset_name
+                )
+                if casefold:
+                    effective = self.capabilities.casefold_identifier(effective)
+                if quote:
+                    effective = self.capabilities.escape_identifier(effective)
+                path.append(effective)
+                if table_name:
+                    name = table_name
+                    if casefold:
+                        name = self.capabilities.casefold_identifier(name)
+                    if quote:
+                        name = self.capabilities.escape_identifier(name)
+                    path.append(name)
+                return path
+            return super().make_qualified_table_name_path(
+                table_name, quote=quote, casefold=casefold
+            )
+
+        # Default (flag off): flatten dataset into a public table-name prefix.
+        # dataset_name/catalog are accepted for signature parity but ignored —
+        # changing this layout would break byte-identity with main.
         if table_name is None:
             return ["public"]
         name = f"{self.dataset_name}_{table_name}" if self.dataset_name else table_name
