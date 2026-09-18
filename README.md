@@ -4,7 +4,7 @@ Community [dlt](https://dlthub.com/) destination for [Firebolt](https://www.fire
 
 Load data into Firebolt with dlt using **direct HTTP upload (default)** or **S3 staging + `COPY INTO`** for large loads.
 
-**Requires [dlt-firebolt 0.3.0+](https://pypi.org/project/dlt-firebolt/0.3.0/)** for upload mode and simplified Core/managed configuration.
+**Requires [dlt-firebolt 0.3.0+](https://pypi.org/project/dlt-firebolt/0.3.0/)** for upload mode; **[0.4.0+](https://pypi.org/project/dlt-firebolt/0.4.0/)** for schema-per-dataset and multi-tenant LOCATION support.
 
 ## Two ways to load
 
@@ -18,7 +18,7 @@ On **managed Firebolt** today, set `FIREBOLT_STAGING_MODE=s3`. Upload is the cod
 ## Install
 
 ```bash
-pip install "dlt-firebolt>=0.3.0"
+pip install "dlt-firebolt>=0.4.0"
 ```
 
 Requires Python 3.10+.
