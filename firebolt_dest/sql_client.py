@@ -189,20 +189,17 @@ class FireboltSqlClient(SqlClientBase[Connection]):
             # Real Firebolt schema: path is [schema] or [schema, table].
             # catalog_name() is None, so SqlClientBase output is byte-identical to
             # the previous hand-rolled branch. Accept dataset_name/catalog so dlt
-            # 1.30+ callers do not TypeError; forward only when base supports them.
+            # 1.30+ callers do not TypeError; forward each kwarg only when the
+            # installed base signature accepts it (dataset_name and catalog must
+            # not be coupled — 1.29 has dataset_name but not catalog).
             base_params = inspect.signature(
                 SqlClientBase.make_qualified_table_name_path
             ).parameters
-            if "dataset_name" in base_params:
-                return super().make_qualified_table_name_path(
-                    table_name,
-                    quote=quote,
-                    casefold=casefold,
-                    dataset_name=dataset_name,
-                    catalog=catalog,
-                )
-            # dlt < 1.30: emulate the 1.30 override path so kwargs never TypeError.
-            if catalog is not None or dataset_name is not None:
+            # Overrides the base cannot apply: emulate the 1.30 path so our
+            # public kwargs never TypeError and catalog still works on older dlt.
+            if (catalog is not None and "catalog" not in base_params) or (
+                dataset_name is not None and "dataset_name" not in base_params
+            ):
                 path: List[str] = []
                 if catalog is not None:
                     cat = catalog
@@ -227,9 +224,16 @@ class FireboltSqlClient(SqlClientBase[Connection]):
                         name = self.capabilities.escape_identifier(name)
                     path.append(name)
                 return path
-            return super().make_qualified_table_name_path(
-                table_name, quote=quote, casefold=casefold
-            )
+            forward: dict[str, Any] = {}
+            if "quote" in base_params:
+                forward["quote"] = quote
+            if "casefold" in base_params:
+                forward["casefold"] = casefold
+            if "dataset_name" in base_params:
+                forward["dataset_name"] = dataset_name
+            if "catalog" in base_params:
+                forward["catalog"] = catalog
+            return super().make_qualified_table_name_path(table_name, **forward)
 
         # Default (flag off): flatten dataset into a public table-name prefix.
         # dataset_name/catalog are accepted for signature parity but ignored —
