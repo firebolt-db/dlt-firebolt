@@ -13,6 +13,8 @@ on:
         required: false
         description: "Override auto-generated version tag (useful for first release in a new repo)."
 
+permissions: {}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -28,10 +30,12 @@ jobs:
           permission-contents: write
 
       - name: Check out code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          # The release step pushes the version bump and tag.
+          persist-credentials: true
 
       - name: Unit tests
         run: |
@@ -40,7 +44,7 @@ jobs:
           pytest -q -m "not integration"
 
       - name: Publish action
-        uses: firebolt-db/action-python-release@0cb5692fd39a782bce366e9120055d999bc8824b # main
+        uses: firebolt-db/action-python-release@535d72bf4fb7ff9ff7f87bb0454e232afe1cef91 # main
         with:
           pre-release-tag: ${{ inputs.pre-release-tag }}
           major-release: ${{ inputs.major-release }}
